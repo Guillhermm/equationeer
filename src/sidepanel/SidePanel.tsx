@@ -153,12 +153,15 @@ export function SidePanel() {
         streamingTextRef.current += message.text;
         setExplanation(streamingTextRef.current);
       } else if (message.type === "STREAM_DONE") {
-        setExplanation(message.fullText);
+        // `explanation` was only the live streaming buffer — clear it now that the
+        // completed message moves into `conversation` (the single source of truth).
+        setExplanation("");
         setIsStreaming(false);
         streamingTextRef.current = "";
 
         const id = currentEntryIdRef.current ?? crypto.randomUUID();
         setCurrentEntryId(id);
+        const nextConversation = [...conversationRef.current, { role: "assistant" as const, content: message.fullText }];
         const entry: HistoryEntry = {
           id,
           math: currentMathRef.current,
@@ -168,11 +171,11 @@ export function SidePanel() {
           pageUrl: currentPageUrlRef.current,
           timestamp: Date.now(),
           bookmarked: false,
-          conversation: [...conversationRef.current, { role: "assistant", content: message.fullText }],
+          conversation: nextConversation,
           isImage: isImageRef.current,
         };
         saveHistoryEntry(entry);
-        setConversation((prev) => [...prev, { role: "assistant", content: message.fullText }]);
+        setConversation(nextConversation);
       } else if (message.type === "STREAM_ERROR") {
         console.error("[EQ:SP] stream error:", message.error);
         setError(message.error);
@@ -292,7 +295,7 @@ export function SidePanel() {
             history={history}
             onSelect={(entry) => {
               setCurrentMath(entry.math);
-              setExplanation(entry.explanation);
+              setExplanation("");
               setConversation(entry.conversation);
               setCurrentEntryId(entry.id);
               setCurrentPageTitle(entry.pageTitle);
@@ -305,7 +308,7 @@ export function SidePanel() {
             onExportJson={async () => downloadFile(await exportHistory(), "equationeer-history.json", "application/json")}
             onExportMd={async () => downloadFile(await exportHistoryAsMarkdown(), "equationeer-history.md", "text/markdown")}
           />
-        ) : !currentMath && !isStreaming && !explanation ? (
+        ) : !currentMath && !isStreaming && conversation.length === 0 ? (
           <EmptyState />
         ) : (
           <>
@@ -377,7 +380,7 @@ export function SidePanel() {
       </main>
 
       {/* Follow-up */}
-      {view === "explanation" && (currentMath || explanation) && !isStreaming && (
+      {view === "explanation" && (currentMath || conversation.length > 0) && !isStreaming && (
         <footer className="px-4 py-3 border-t border-eq-border bg-eq-bg-panel">
           <div className="flex gap-2">
             <input

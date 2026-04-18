@@ -52,9 +52,12 @@ chrome.runtime.onInstalled.addListener((details) => {
 
 // ── Context menu ─────────────────────────────────────────────────────────────
 
-chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId !== "equationeer-explain" || !tab?.id || !info.selectionText) return;
-  await chrome.storage.session.set({
+  // sidePanel.open MUST be called synchronously in the user gesture context;
+  // any await before it expires the gesture and silently fails.
+  chrome.sidePanel.open({ tabId: tab.id }).catch((e) => err("sidePanel.open:", e));
+  chrome.storage.session.set({
     equationeerPending: {
       kind: "math",
       math: info.selectionText,
@@ -62,8 +65,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       pageTitle: tab.title ?? "",
       pageUrl: tab.url ?? "",
     },
-  });
-  await chrome.sidePanel.open({ tabId: tab.id });
+  }).catch((e) => err("storage.session.set:", e));
 });
 
 // ── Keyboard command ─────────────────────────────────────────────────────────
