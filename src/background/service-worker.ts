@@ -120,8 +120,6 @@ async function handleMessage(
       return { success: true };
     }
 
-    // Content script queues a pending explanation in session storage,
-    // then opens the side panel. The side panel reads this on mount.
     case "QUEUE_PENDING": {
       await chrome.storage.session.set({ equationeerPending: message.payload });
       log("Queued pending explanation");
@@ -164,7 +162,7 @@ async function handleMessage(
 
 async function handleExplainMath(payload: {
   math: string; surroundingText: string;
-  pageTitle: string; depth: string;
+  pageTitle: string; pageUrl: string; depth: string;
 }): Promise<unknown> {
   const limitErr = rateLimitCheck();
   if (limitErr) { broadcastError(limitErr); return { error: limitErr }; }
@@ -180,22 +178,25 @@ async function handleExplainMath(payload: {
     math: payload.math,
     surroundingText: payload.surroundingText,
     pageTitle: payload.pageTitle,
+    pageUrl: payload.pageUrl,
     depth: payload.depth as "grad" | "undergrad" | "curious",
+    language: settings.language,
   });
 
-  log("Starting Claude stream for math...");
+  log("Starting Claude stream for math, model:", settings.model);
   streamExplanation(
     settings.apiKey,
     systemPrompt,
     [{ role: "user", content: payload.math }],
     broadcast,
+    { model: settings.model, maxTokens: settings.maxTokens },
   ).catch((e) => { err(e); broadcastError(String(e)); });
 
   return { streaming: true };
 }
 
 async function handleExplainImage(payload: {
-  imageDataUrl: string; pageTitle: string; depth: string;
+  imageDataUrl: string; pageTitle: string; pageUrl: string; depth: string;
 }): Promise<unknown> {
   const limitErr = rateLimitCheck();
   if (limitErr) { broadcastError(limitErr); return { error: limitErr }; }
@@ -209,12 +210,19 @@ async function handleExplainImage(payload: {
 
   const systemPrompt = buildImageExplanationPrompt({
     pageTitle: payload.pageTitle,
+    pageUrl: payload.pageUrl,
     depth: payload.depth as "grad" | "undergrad" | "curious",
+    language: settings.language,
   });
 
-  log("Starting Claude stream for image...");
-  streamImageExplanation(settings.apiKey, systemPrompt, payload.imageDataUrl, broadcast)
-    .catch((e) => { err(e); broadcastError(String(e)); });
+  log("Starting Claude stream for image, model:", settings.model);
+  streamImageExplanation(
+    settings.apiKey,
+    systemPrompt,
+    payload.imageDataUrl,
+    broadcast,
+    { model: settings.model, maxTokens: settings.maxTokens },
+  ).catch((e) => { err(e); broadcastError(String(e)); });
 
   return { streaming: true };
 }
@@ -236,6 +244,7 @@ async function handleFollowUp(payload: {
   const systemPrompt = buildFollowUpPrompt({
     originalMath: payload.originalMath,
     depth: payload.depth as "grad" | "undergrad" | "curious",
+    language: settings.language,
   });
 
   const messages = [
@@ -243,9 +252,14 @@ async function handleFollowUp(payload: {
     { role: "user" as const, content: payload.question },
   ];
 
-  log("Starting Claude stream for follow-up...");
-  streamExplanation(settings.apiKey, systemPrompt, messages, broadcast)
-    .catch((e) => { err(e); broadcastError(String(e)); });
+  log("Starting Claude stream for follow-up, model:", settings.model);
+  streamExplanation(
+    settings.apiKey,
+    systemPrompt,
+    messages,
+    broadcast,
+    { model: settings.model, maxTokens: settings.maxTokens },
+  ).catch((e) => { err(e); broadcastError(String(e)); });
 
   return { streaming: true };
 }

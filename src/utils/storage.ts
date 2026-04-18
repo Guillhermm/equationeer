@@ -85,6 +85,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   defaultDepth: "undergrad",
   theme: "dark",
   onboardingCompleted: false,
+  model: "claude-sonnet-4-6",
+  maxTokens: 1500,
+  language: "English",
 };
 
 export async function getSettings(): Promise<AppSettings> {

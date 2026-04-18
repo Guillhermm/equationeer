@@ -38,7 +38,7 @@ describe("streamExplanation", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const received: StreamMessage[] = [];
-    await streamExplanation("key-123", systemPrompt, messages, (m) => received.push(m));
+    await streamExplanation("key-123", systemPrompt, messages, (m) => received.push(m), { model: "claude-sonnet-4-6", maxTokens: 1500 });
 
     expect(mockFetch).toHaveBeenCalledOnce();
     const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
@@ -48,14 +48,15 @@ describe("streamExplanation", () => {
     expect(headers["anthropic-version"]).toBe("2023-06-01");
   });
 
-  it("uses model claude-sonnet-4-6", async () => {
+  it("uses the model and maxTokens from options", async () => {
     const mockFetch = makeMockFetch(200, makeSSEStream(["data: [DONE]"]));
     vi.stubGlobal("fetch", mockFetch);
 
-    await streamExplanation("k", systemPrompt, messages, () => {});
+    await streamExplanation("k", systemPrompt, messages, () => {}, { model: "claude-opus-4-7", maxTokens: 512 });
 
     const body = JSON.parse((mockFetch.mock.calls[0][1] as RequestInit).body as string);
-    expect(body.model).toBe("claude-sonnet-4-6");
+    expect(body.model).toBe("claude-opus-4-7");
+    expect(body.max_tokens).toBe(512);
   });
 
   it("sends STREAM_CHUNK messages for each token", async () => {
@@ -64,7 +65,7 @@ describe("streamExplanation", () => {
     vi.stubGlobal("fetch", makeMockFetch(200, stream));
 
     const received: StreamMessage[] = [];
-    await streamExplanation("k", systemPrompt, messages, (m) => received.push(m));
+    await streamExplanation("k", systemPrompt, messages, (m) => received.push(m), { model: "claude-sonnet-4-6", maxTokens: 1500 });
 
     const chunks = received.filter((m) => m.type === "STREAM_CHUNK");
     expect(chunks).toHaveLength(1);
@@ -78,7 +79,7 @@ describe("streamExplanation", () => {
     vi.stubGlobal("fetch", makeMockFetch(200, stream));
 
     const received: StreamMessage[] = [];
-    await streamExplanation("k", systemPrompt, messages, (m) => received.push(m));
+    await streamExplanation("k", systemPrompt, messages, (m) => received.push(m), { model: "claude-sonnet-4-6", maxTokens: 1500 });
 
     const done = received.find((m) => m.type === "STREAM_DONE") as Extract<StreamMessage, { type: "STREAM_DONE" }>;
     expect(done).toBeDefined();
@@ -89,7 +90,7 @@ describe("streamExplanation", () => {
     vi.stubGlobal("fetch", makeMockFetch(401, "Unauthorized", false));
 
     const received: StreamMessage[] = [];
-    await streamExplanation("bad-key", systemPrompt, messages, (m) => received.push(m));
+    await streamExplanation("bad-key", systemPrompt, messages, (m) => received.push(m), { model: "claude-sonnet-4-6", maxTokens: 1500 });
 
     const err = received.find((m) => m.type === "STREAM_ERROR") as Extract<StreamMessage, { type: "STREAM_ERROR" }>;
     expect(err).toBeDefined();
@@ -100,7 +101,7 @@ describe("streamExplanation", () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Network failure")));
 
     const received: StreamMessage[] = [];
-    await streamExplanation("k", systemPrompt, messages, (m) => received.push(m));
+    await streamExplanation("k", systemPrompt, messages, (m) => received.push(m), { model: "claude-sonnet-4-6", maxTokens: 1500 });
 
     const err = received.find((m) => m.type === "STREAM_ERROR") as Extract<StreamMessage, { type: "STREAM_ERROR" }>;
     expect(err?.error).toContain("Network failure");
@@ -110,7 +111,7 @@ describe("streamExplanation", () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue("plain string error"));
 
     const received: StreamMessage[] = [];
-    await streamExplanation("k", systemPrompt, messages, (m) => received.push(m));
+    await streamExplanation("k", systemPrompt, messages, (m) => received.push(m), { model: "claude-sonnet-4-6", maxTokens: 1500 });
 
     const err = received.find((m) => m.type === "STREAM_ERROR") as Extract<StreamMessage, { type: "STREAM_ERROR" }>;
     expect(err?.error).toBe("plain string error");
@@ -122,7 +123,7 @@ describe("streamExplanation", () => {
     vi.stubGlobal("fetch", makeMockFetch(200, stream));
 
     const received: StreamMessage[] = [];
-    await streamExplanation("k", systemPrompt, messages, (m) => received.push(m));
+    await streamExplanation("k", systemPrompt, messages, (m) => received.push(m), { model: "claude-sonnet-4-6", maxTokens: 1500 });
 
     const done = received.find((m) => m.type === "STREAM_DONE") as Extract<StreamMessage, { type: "STREAM_DONE" }>;
     expect(done?.fullText).toBe("");
@@ -133,7 +134,7 @@ describe("streamExplanation", () => {
     vi.stubGlobal("fetch", makeMockFetch(200, stream));
 
     const received: StreamMessage[] = [];
-    await streamExplanation("k", systemPrompt, messages, (m) => received.push(m));
+    await streamExplanation("k", systemPrompt, messages, (m) => received.push(m), { model: "claude-sonnet-4-6", maxTokens: 1500 });
 
     // Should still complete with empty text, no crash
     const done = received.find((m) => m.type === "STREAM_DONE");
@@ -144,7 +145,7 @@ describe("streamExplanation", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, body: null }));
 
     const received: StreamMessage[] = [];
-    await streamExplanation("k", systemPrompt, messages, (m) => received.push(m));
+    await streamExplanation("k", systemPrompt, messages, (m) => received.push(m), { model: "claude-sonnet-4-6", maxTokens: 1500 });
 
     const err = received.find((m) => m.type === "STREAM_ERROR");
     expect(err).toBeDefined();
@@ -156,7 +157,7 @@ describe("streamExplanation", () => {
     vi.stubGlobal("fetch", makeMockFetch(200, stream));
 
     const received: StreamMessage[] = [];
-    await streamExplanation("k", systemPrompt, messages, (m) => received.push(m));
+    await streamExplanation("k", systemPrompt, messages, (m) => received.push(m), { model: "claude-sonnet-4-6", maxTokens: 1500 });
 
     const chunks = received.filter((m) => m.type === "STREAM_CHUNK");
     expect(chunks).toHaveLength(0);
@@ -170,7 +171,7 @@ describe("streamImageExplanation", () => {
 
   it("sends STREAM_ERROR for invalid data URL", async () => {
     const received: StreamMessage[] = [];
-    await streamImageExplanation("k", "prompt", "not-a-data-url", (m) => received.push(m));
+    await streamImageExplanation("k", "prompt", "not-a-data-url", (m) => received.push(m), { model: "claude-sonnet-4-6", maxTokens: 1500 });
 
     const err = received.find((m) => m.type === "STREAM_ERROR") as Extract<StreamMessage, { type: "STREAM_ERROR" }>;
     expect(err?.error).toContain("Invalid image");
@@ -183,7 +184,7 @@ describe("streamImageExplanation", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const received: StreamMessage[] = [];
-    await streamImageExplanation("k", "prompt", fakeDataUrl, (m) => received.push(m));
+    await streamImageExplanation("k", "prompt", fakeDataUrl, (m) => received.push(m), { model: "claude-sonnet-4-6", maxTokens: 1500 });
 
     const body = JSON.parse((mockFetch.mock.calls[0][1] as RequestInit).body as string);
     const content = body.messages[0].content;
@@ -198,7 +199,7 @@ describe("streamImageExplanation", () => {
     vi.stubGlobal("fetch", makeMockFetch(200, stream));
 
     const received: StreamMessage[] = [];
-    await streamImageExplanation("k", "prompt", "data:image/png;base64,xyz", (m) => received.push(m));
+    await streamImageExplanation("k", "prompt", "data:image/png;base64,xyz", (m) => received.push(m), { model: "claude-sonnet-4-6", maxTokens: 1500 });
 
     const done = received.find((m) => m.type === "STREAM_DONE") as Extract<StreamMessage, { type: "STREAM_DONE" }>;
     expect(done?.fullText).toBe("Result");

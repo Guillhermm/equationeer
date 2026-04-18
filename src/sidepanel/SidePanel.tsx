@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { marked } from "marked";
+import katex from "katex";
+import "katex/dist/katex.min.css";
 import type {
   ExplanationDepth,
   StreamMessage,
@@ -18,6 +20,32 @@ import {
 
 type View = "explanation" | "history";
 
+// ── KaTeX pre-processor ────────────────────────────────────────────────────────
+// Replaces $$...$$ and $...$ in markdown with rendered KaTeX HTML before marked
+// processes the rest. Marked passes HTML through unchanged.
+function renderLatex(text: string): string {
+  // Display math first to avoid conflicting with inline pass
+  let result = text.replace(/\$\$([\s\S]+?)\$\$/g, (_, math: string) => {
+    try {
+      return katex.renderToString(math.trim(), { displayMode: true, throwOnError: false, output: "html" });
+    } catch {
+      return `$$${math}$$`;
+    }
+  });
+  result = result.replace(/\$([^$\n]+?)\$/g, (_, math: string) => {
+    try {
+      return katex.renderToString(math.trim(), { displayMode: false, throwOnError: false, output: "html" });
+    } catch {
+      return `$${math}$`;
+    }
+  });
+  return result;
+}
+
+function renderMarkdown(md: string): { __html: string } {
+  return { __html: marked.parse(renderLatex(md), { async: false }) as string };
+}
+
 export function SidePanel() {
   const [view, setView] = useState<View>("explanation");
   const [explanation, setExplanation] = useState("");
@@ -28,13 +56,14 @@ export function SidePanel() {
   const [currentPageTitle, setCurrentPageTitle] = useState("");
   const [currentPageUrl, setCurrentPageUrl] = useState("");
   const [isImage, setIsImage] = useState(false);
+  const [currentImageDataUrl, setCurrentImageDataUrl] = useState("");
   const [conversation, setConversation] = useState<ConversationMessage[]>([]);
   const [followUpInput, setFollowUpInput] = useState("");
   const [currentEntryId, setCurrentEntryId] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
   const explanationRef = useRef<HTMLDivElement>(null);
   const streamingTextRef = useRef("");
-  // Keep a stable ref to depth so callbacks closed over state see the latest value
   const depthRef = useRef<ExplanationDepth>(depth);
   depthRef.current = depth;
 
@@ -49,8 +78,6 @@ export function SidePanel() {
   }, []);
 
   // ── Pending explanation handshake ──────────────────────────────────────────
-  // The content script stores a PendingExplanation in chrome.storage.session
-  // and then opens the side panel. We read it here after we're mounted.
 
   const executePending = useCallback((pending: PendingExplanation) => {
     console.log("[EQ:SP] executing pending:", pending.kind);
@@ -61,6 +88,7 @@ export function SidePanel() {
       setCurrentPageTitle(pending.pageTitle);
       setCurrentPageUrl(pending.pageUrl);
       setIsImage(false);
+      setCurrentImageDataUrl("");
       setExplanation("");
       setError(null);
       setConversation([]);
@@ -84,6 +112,7 @@ export function SidePanel() {
       setCurrentPageTitle(pending.pageTitle);
       setCurrentPageUrl(pending.pageUrl);
       setIsImage(true);
+      setCurrentImageDataUrl(pending.imageDataUrl);
       setExplanation("");
       setError(null);
       setConversation([]);
@@ -104,18 +133,31 @@ export function SidePanel() {
     }
   }, []);
 
-  // On mount: check if there's already a pending request
+  // On mount: check pending, fall back to last history entry
   useEffect(() => {
     chrome.storage.session.get("equationeerPending", (result) => {
       const pending = result["equationeerPending"] as PendingExplanation | undefined;
       if (pending) {
         chrome.storage.session.remove("equationeerPending");
         executePending(pending);
+      } else {
+        // Restore last session so re-opening the panel isn't a blank slate
+        getHistoryEntries().then((entries) => {
+          if (entries.length > 0) {
+            const last = entries[0];
+            setCurrentMath(last.math);
+            setConversation(last.conversation);
+            setCurrentEntryId(last.id);
+            setCurrentPageTitle(last.pageTitle);
+            setCurrentPageUrl(last.pageUrl);
+            setIsImage(last.isImage);
+          }
+        });
       }
     });
   }, [executePending]);
 
-  // While open: listen for new pending requests (user explains another equation)
+  // While open: listen for new pending requests
   useEffect(() => {
     const handler = (
       changes: Record<string, chrome.storage.StorageChange>,
@@ -153,8 +195,6 @@ export function SidePanel() {
         streamingTextRef.current += message.text;
         setExplanation(streamingTextRef.current);
       } else if (message.type === "STREAM_DONE") {
-        // `explanation` was only the live streaming buffer — clear it now that the
-        // completed message moves into `conversation` (the single source of truth).
         setExplanation("");
         setIsStreaming(false);
         streamingTextRef.current = "";
@@ -220,10 +260,39 @@ export function SidePanel() {
     });
   };
 
+  const reExplain = () => {
+    if (!currentMath || isStreaming) return;
+    setExplanation("");
+    setConversation([]);
+    setCurrentEntryId(null);
+    setError(null);
+    setIsStreaming(true);
+    streamingTextRef.current = "";
+
+    if (isImage && currentImageDataUrl) {
+      chrome.runtime.sendMessage({
+        type: "EXPLAIN_IMAGE",
+        payload: { imageDataUrl: currentImageDataUrl, pageTitle: currentPageTitle, pageUrl: currentPageUrl, depth },
+      });
+    } else {
+      chrome.runtime.sendMessage({
+        type: "EXPLAIN_MATH",
+        payload: { math: currentMath, surroundingText: "", pageTitle: currentPageTitle, pageUrl: currentPageUrl, depth },
+      });
+    }
+  };
+
   const startFresh = () => {
     setExplanation(""); setConversation([]); setCurrentEntryId(null);
     setError(null); setCurrentMath(""); setIsStreaming(false);
     streamingTextRef.current = "";
+  };
+
+  const copyToClipboard = (text: string, idx: number) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedIdx(idx);
+      setTimeout(() => setCopiedIdx(null), 1500);
+    }).catch(() => {});
   };
 
   const loadHistory = async () => {
@@ -231,12 +300,11 @@ export function SidePanel() {
     setView("history");
   };
 
-  const renderMarkdown = (md: string) =>
-    ({ __html: marked.parse(md, { async: false }) as string });
-
   const depthLabels: Record<ExplanationDepth, string> = {
     grad: "Grad", undergrad: "Undergrad", curious: "Curious",
   };
+
+  const canReExplain = currentMath && !isStreaming && (!isImage || !!currentImageDataUrl);
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -285,6 +353,16 @@ export function SidePanel() {
               {depthLabels[d]}
             </button>
           ))}
+          {canReExplain && (
+            <button
+              onClick={reExplain}
+              className="ml-auto px-2 py-1 text-xs rounded border border-eq-border text-eq-text-secondary hover:text-eq-text-primary hover:border-eq-accent/40 transition-colors"
+              aria-label="Re-explain with current depth"
+              title="Re-explain at current depth"
+            >
+              ↺
+            </button>
+          )}
         </div>
       )}
 
@@ -301,6 +379,7 @@ export function SidePanel() {
               setCurrentPageTitle(entry.pageTitle);
               setCurrentPageUrl(entry.pageUrl);
               setIsImage(entry.isImage);
+              setCurrentImageDataUrl("");
               setView("explanation");
             }}
             onToggleBookmark={async (id) => { await toggleBookmark(id); loadHistory(); }}
@@ -326,15 +405,26 @@ export function SidePanel() {
                 {conversation.map((msg, i) => (
                   <div
                     key={i}
-                    className={`p-3 rounded-lg ${
+                    className={`p-3 rounded-lg group relative ${
                       msg.role === "user"
                         ? "bg-eq-accent/10 border border-eq-accent/20"
                         : "bg-eq-bg-secondary border border-eq-border"
                     }`}
                   >
-                    <p className="text-xs text-eq-text-secondary mb-1">
-                      {msg.role === "user" ? "You" : "Equationeer"}
-                    </p>
+                    <div className="flex items-center justify-between mb-1">
+                      <p className="text-xs text-eq-text-secondary">
+                        {msg.role === "user" ? "You" : "Equationeer"}
+                      </p>
+                      {msg.role === "assistant" && (
+                        <button
+                          onClick={() => copyToClipboard(msg.content, i)}
+                          className="opacity-0 group-hover:opacity-100 px-1.5 py-0.5 text-xs text-eq-text-secondary hover:text-eq-text-primary border border-eq-border rounded transition-all"
+                          aria-label="Copy explanation"
+                        >
+                          {copiedIdx === i ? "Copied!" : "Copy"}
+                        </button>
+                      )}
+                    </div>
                     <div className="text-sm markdown-body" dangerouslySetInnerHTML={renderMarkdown(msg.content)} />
                   </div>
                 ))}

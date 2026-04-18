@@ -67,6 +67,27 @@ describe("buildExplanationPrompt", () => {
   it("returns a string", () => {
     expect(typeof buildExplanationPrompt(base)).toBe("string");
   });
+
+  it("includes language instruction when not English", () => {
+    const p = buildExplanationPrompt({ ...base, language: "Portuguese" });
+    expect(p).toContain("Portuguese");
+    expect(p).toContain("IMPORTANT");
+  });
+
+  it("does not include language instruction for English", () => {
+    const p = buildExplanationPrompt({ ...base, language: "English" });
+    expect(p).not.toContain("IMPORTANT");
+  });
+
+  it("includes domain hint when pageUrl is valid", () => {
+    const p = buildExplanationPrompt({ ...base, pageUrl: "https://arxiv.org/abs/1234" });
+    expect(p).toContain("arxiv.org");
+  });
+
+  it("omits domain hint for empty pageUrl", () => {
+    const p = buildExplanationPrompt({ ...base, pageUrl: "" });
+    expect(p).not.toContain("page_domain");
+  });
 });
 
 describe("buildImageExplanationPrompt", () => {
@@ -88,6 +109,16 @@ describe("buildImageExplanationPrompt", () => {
   it("mentions screenshot/image", () => {
     const p = buildImageExplanationPrompt({ pageTitle: "t", depth: "grad" });
     expect(p.toLowerCase()).toMatch(/image|screenshot/);
+  });
+
+  it("includes language instruction when not English", () => {
+    const p = buildImageExplanationPrompt({ pageTitle: "t", depth: "grad", language: "Spanish" });
+    expect(p).toContain("Spanish");
+  });
+
+  it("includes domain hint for valid pageUrl", () => {
+    const p = buildImageExplanationPrompt({ pageTitle: "t", depth: "grad", pageUrl: "https://nature.com/article" });
+    expect(p).toContain("nature.com");
   });
 });
 

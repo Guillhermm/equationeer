@@ -174,19 +174,27 @@ describe("exportHistoryAsMarkdown", () => {
 
 // ── getSettings / saveSettings ────────────────────────────────────────────────
 
+const defaultSettings = {
+  apiKey: "", defaultDepth: "undergrad", theme: "dark",
+  onboardingCompleted: false, model: "claude-sonnet-4-6", maxTokens: 1500, language: "English",
+};
+
 describe("getSettings", () => {
   it("returns default settings when storage is empty", async () => {
-    chrome.storage.local.get.mockImplementation((_keys, callback) => {
-      callback({ apiKey: "", defaultDepth: "undergrad", theme: "dark", onboardingCompleted: false });
+    chrome.storage.local.get.mockImplementation((_keys: unknown, callback: (r: unknown) => void) => {
+      callback(defaultSettings);
     });
     const settings = await storage.getSettings();
     expect(settings.defaultDepth).toBe("undergrad");
     expect(settings.theme).toBe("dark");
+    expect(settings.model).toBe("claude-sonnet-4-6");
+    expect(settings.maxTokens).toBe(1500);
+    expect(settings.language).toBe("English");
   });
 
   it("returns stored api key", async () => {
-    chrome.storage.local.get.mockImplementation((_keys, callback) => {
-      callback({ apiKey: "sk-test", defaultDepth: "undergrad", theme: "dark", onboardingCompleted: true });
+    chrome.storage.local.get.mockImplementation((_keys: unknown, callback: (r: unknown) => void) => {
+      callback({ ...defaultSettings, apiKey: "sk-test", onboardingCompleted: true });
     });
     const settings = await storage.getSettings();
     expect(settings.apiKey).toBe("sk-test");
@@ -195,16 +203,17 @@ describe("getSettings", () => {
 
 describe("saveSettings", () => {
   it("calls chrome.storage.local.set with merged settings", async () => {
-    chrome.storage.local.get.mockImplementation((_keys, callback) => {
-      callback({ apiKey: "", defaultDepth: "undergrad", theme: "dark", onboardingCompleted: false });
+    chrome.storage.local.get.mockImplementation((_keys: unknown, callback: (r: unknown) => void) => {
+      callback(defaultSettings);
     });
-    chrome.storage.local.set.mockImplementation((_data, callback) => {
+    chrome.storage.local.set.mockImplementation((_data: unknown, callback?: () => void) => {
       callback?.();
     });
 
-    const result = await storage.saveSettings({ apiKey: "new-key", theme: "light" });
+    const result = await storage.saveSettings({ apiKey: "new-key", theme: "light", model: "claude-opus-4-7" });
     expect(result.apiKey).toBe("new-key");
     expect(result.theme).toBe("light");
+    expect(result.model).toBe("claude-opus-4-7");
     expect(result.defaultDepth).toBe("undergrad"); // unchanged
     expect(chrome.storage.local.set).toHaveBeenCalled();
   });

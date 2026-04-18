@@ -2,18 +2,23 @@ import type { StreamMessage } from "../types/messages";
 
 const API_URL = "https://api.anthropic.com/v1/messages";
 const API_VERSION = "2023-06-01";
-const MODEL = "claude-sonnet-4-6";
 
 type ConversationMessage = { role: "user" | "assistant"; content: string | unknown[] };
 type StreamCallback = (msg: StreamMessage) => void;
+
+interface StreamOptions {
+  model: string;
+  maxTokens: number;
+}
 
 export async function streamExplanation(
   apiKey: string,
   systemPrompt: string,
   messages: ConversationMessage[],
   onMessage: StreamCallback,
+  options: StreamOptions,
 ): Promise<void> {
-  console.log("[EQ:api] streamExplanation start, model:", MODEL);
+  console.log("[EQ:api] streamExplanation start, model:", options.model);
   let fullText = "";
 
   try {
@@ -26,8 +31,8 @@ export async function streamExplanation(
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        model: MODEL,
-        max_tokens: 2048,
+        model: options.model,
+        max_tokens: options.maxTokens,
         system: systemPrompt,
         messages,
         stream: true,
@@ -101,6 +106,7 @@ export async function streamImageExplanation(
   systemPrompt: string,
   imageDataUrl: string,
   onMessage: StreamCallback,
+  options: StreamOptions,
 ): Promise<void> {
   const match = imageDataUrl.match(/^data:(image\/\w+);base64,(.+)$/);
   if (!match) {
@@ -127,6 +133,7 @@ export async function streamImageExplanation(
       },
     ],
     onMessage,
+    options,
   );
 }
 
@@ -141,7 +148,7 @@ export async function validateApiKey(apiKey: string): Promise<boolean> {
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        model: MODEL,
+        model: "claude-haiku-4-5-20251001",
         max_tokens: 10,
         messages: [{ role: "user", content: "ok" }],
       }),
