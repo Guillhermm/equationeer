@@ -49,6 +49,21 @@ export interface SaveSettingsRequest {
   payload: Partial<AppSettings>;
 }
 
+/** Stored in chrome.storage.session so the side panel can pick it up after mount */
+export interface PendingExplanation {
+  kind: "math" | "image";
+  math?: string;
+  imageDataUrl?: string;
+  surroundingText?: string;
+  pageTitle: string;
+  pageUrl: string;
+}
+
+export interface QueuePendingRequest {
+  type: "QUEUE_PENDING";
+  payload: PendingExplanation;
+}
+
 export type ExtensionMessage =
   | ExplainMathRequest
   | ExplainImageRequest
@@ -56,7 +71,8 @@ export type ExtensionMessage =
   | ValidateKeyRequest
   | OpenSidePanelRequest
   | GetSettingsRequest
-  | SaveSettingsRequest;
+  | SaveSettingsRequest
+  | QueuePendingRequest;
 
 export interface StreamChunk {
   type: "STREAM_CHUNK";

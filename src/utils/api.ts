@@ -1,127 +1,152 @@
-import Anthropic from "@anthropic-ai/sdk";
 import type { StreamMessage } from "../types/messages";
 
-let client: Anthropic | null = null;
+const API_URL = "https://api.anthropic.com/v1/messages";
+const API_VERSION = "2023-06-01";
+const MODEL = "claude-sonnet-4-6";
 
-function getClient(apiKey: string): Anthropic {
-  if (!client || (client as unknown as { apiKey: string }).apiKey !== apiKey) {
-    client = new Anthropic({
-      apiKey,
-      dangerouslyAllowBrowser: true,
-    });
-  }
-  return client;
-}
+type ConversationMessage = { role: "user" | "assistant"; content: string | unknown[] };
+type StreamCallback = (msg: StreamMessage) => void;
 
 export async function streamExplanation(
   apiKey: string,
   systemPrompt: string,
-  messages: Array<{ role: "user" | "assistant"; content: string | Anthropic.MessageCreateParams["messages"][0]["content"] }>,
-  onMessage: (msg: StreamMessage) => void,
+  messages: ConversationMessage[],
+  onMessage: StreamCallback,
 ): Promise<void> {
-  const anthropic = getClient(apiKey);
+  console.log("[EQ:api] streamExplanation start, model:", MODEL);
   let fullText = "";
 
   try {
-    const stream = anthropic.messages.stream({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 2048,
-      system: systemPrompt,
-      messages,
+    const response = await fetch(API_URL, {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": API_VERSION,
+        "anthropic-dangerous-direct-browser-access": "true",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: 2048,
+        system: systemPrompt,
+        messages,
+        stream: true,
+      }),
     });
 
-    for await (const event of stream) {
-      if (
-        event.type === "content_block_delta" &&
-        event.delta.type === "text_delta"
-      ) {
-        fullText += event.delta.text;
-        onMessage({ type: "STREAM_CHUNK", text: event.delta.text });
+    console.log("[EQ:api] response status:", response.status);
+
+    if (!response.ok) {
+      const errText = await response.text();
+      onMessage({ type: "STREAM_ERROR", error: `API ${response.status}: ${errText}` });
+      return;
+    }
+
+    if (!response.body) {
+      onMessage({ type: "STREAM_ERROR", error: "No response body" });
+      return;
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      let newlineIdx: number;
+      while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
+        const line = buffer.slice(0, newlineIdx);
+        buffer = buffer.slice(newlineIdx + 1);
+        const chunk = parseSSELine(line);
+        if (chunk) {
+          fullText += chunk;
+          onMessage({ type: "STREAM_CHUNK", text: chunk });
+        }
       }
     }
 
+    console.log("[EQ:api] stream complete, chars:", fullText.length);
     onMessage({ type: "STREAM_DONE", fullText });
   } catch (err) {
-    const message =
-      err instanceof Error ? err.message : "Unknown error occurred";
-    onMessage({ type: "STREAM_ERROR", error: message });
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[EQ:api] fetch error:", msg);
+    onMessage({ type: "STREAM_ERROR", error: msg });
   }
+}
+
+function parseSSELine(line: string): string | null {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("data: ")) return null;
+  const data = trimmed.slice(6);
+  if (data === "[DONE]") return null;
+  try {
+    const event = JSON.parse(data) as {
+      type: string;
+      delta?: { type: string; text?: string };
+    };
+    if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
+      return event.delta.text ?? null;
+    }
+  } catch {
+    // ignore malformed SSE lines
+  }
+  return null;
 }
 
 export async function streamImageExplanation(
   apiKey: string,
   systemPrompt: string,
   imageDataUrl: string,
-  onMessage: (msg: StreamMessage) => void,
+  onMessage: StreamCallback,
 ): Promise<void> {
-  const anthropic = getClient(apiKey);
-  let fullText = "";
-
   const match = imageDataUrl.match(/^data:(image\/\w+);base64,(.+)$/);
   if (!match) {
-    onMessage({ type: "STREAM_ERROR", error: "Invalid image data" });
+    onMessage({ type: "STREAM_ERROR", error: "Invalid image data URL" });
     return;
   }
 
-  const mediaType = match[1] as "image/jpeg" | "image/png" | "image/gif" | "image/webp";
-  const base64Data = match[2];
-
-  try {
-    const stream = anthropic.messages.stream({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 2048,
-      system: systemPrompt,
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "image",
-              source: {
-                type: "base64",
-                media_type: mediaType,
-                data: base64Data,
-              },
-            },
-            {
-              type: "text",
-              text: "Please explain the mathematical equation(s) shown in this image.",
-            },
-          ],
-        },
-      ],
-    });
-
-    for await (const event of stream) {
-      if (
-        event.type === "content_block_delta" &&
-        event.delta.type === "text_delta"
-      ) {
-        fullText += event.delta.text;
-        onMessage({ type: "STREAM_CHUNK", text: event.delta.text });
-      }
-    }
-
-    onMessage({ type: "STREAM_DONE", fullText });
-  } catch (err) {
-    const message =
-      err instanceof Error ? err.message : "Unknown error occurred";
-    onMessage({ type: "STREAM_ERROR", error: message });
-  }
+  await streamExplanation(
+    apiKey,
+    systemPrompt,
+    [
+      {
+        role: "user",
+        content: [
+          {
+            type: "image",
+            source: { type: "base64", media_type: match[1], data: match[2] },
+          },
+          {
+            type: "text",
+            text: "Please explain the mathematical equation(s) shown in this image.",
+          },
+        ],
+      },
+    ],
+    onMessage,
+  );
 }
 
 export async function validateApiKey(apiKey: string): Promise<boolean> {
   try {
-    const anthropic = new Anthropic({
-      apiKey,
-      dangerouslyAllowBrowser: true,
+    const response = await fetch(API_URL, {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": API_VERSION,
+        "anthropic-dangerous-direct-browser-access": "true",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: 10,
+        messages: [{ role: "user", content: "ok" }],
+      }),
     });
-    await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 10,
-      messages: [{ role: "user", content: "Say ok" }],
-    });
-    return true;
+    return response.ok;
   } catch {
     return false;
   }

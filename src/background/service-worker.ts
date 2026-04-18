@@ -5,227 +5,245 @@ import {
   buildFollowUpPrompt,
   buildImageExplanationPrompt,
 } from "../utils/promptBuilder";
-import type { ExtensionMessage, StreamMessage } from "../types/messages";
+import type { StreamMessage } from "../types/messages";
 
-interface CaptureTabRequest {
-  type: "CAPTURE_TAB";
-}
+const log = (...a: unknown[]) => console.log("[EQ:SW]", ...a);
+const err = (...a: unknown[]) => console.error("[EQ:SW]", ...a);
 
-interface ContextMenuExplainMessage {
-  type: "CONTEXT_MENU_EXPLAIN";
-  payload: { text: string };
-}
+// ── Rate limiting ────────────────────────────────────────────────────────────
 
-type AllMessages = ExtensionMessage | CaptureTabRequest | ContextMenuExplainMessage;
+let timestamps: number[] = [];
+let lastRequest = 0;
 
-// Rate limiting
-let requestTimestamps: number[] = [];
-const MAX_REQUESTS_PER_MINUTE = 30;
-const DEBOUNCE_MS = 500;
-let lastRequestTime = 0;
-
-function isRateLimited(): boolean {
+function rateLimitCheck(): string | null {
   const now = Date.now();
-  requestTimestamps = requestTimestamps.filter((t) => now - t < 60_000);
-  return requestTimestamps.length >= MAX_REQUESTS_PER_MINUTE;
+  if (now - lastRequest < 500) return "Too fast — wait a moment before requesting again.";
+  lastRequest = now;
+  timestamps = timestamps.filter((t) => now - t < 60_000);
+  if (timestamps.length >= 30) return "Rate limit: 30 requests per minute. Please wait.";
+  timestamps.push(now);
+  return null;
 }
 
-function isDebouncedTooSoon(): boolean {
-  const now = Date.now();
-  if (now - lastRequestTime < DEBOUNCE_MS) return true;
-  lastRequestTime = now;
-  return false;
-}
+// ── Broadcast helpers ────────────────────────────────────────────────────────
 
-// Set up side panel behavior
-chrome.sidePanel
-  .setPanelBehavior({ openPanelOnActionClick: false })
-  .catch(() => {});
-
-// Context menu
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.contextMenus.create({
-    id: "equationeer-explain",
-    title: "Explain with Equationeer",
-    contexts: ["selection"],
+function broadcast(msg: StreamMessage): void {
+  chrome.runtime.sendMessage(msg).catch(() => {
+    // Side panel may not be open — that's fine
   });
+}
+
+function broadcastError(message: string): void {
+  broadcast({ type: "STREAM_ERROR", error: message });
+}
+
+// ── Extension lifecycle ──────────────────────────────────────────────────────
+
+chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => {});
+
+chrome.runtime.onInstalled.addListener((details) => {
+  log("Installed:", details.reason);
+  chrome.contextMenus.create(
+    { id: "equationeer-explain", title: "Explain with Equationeer", contexts: ["selection"] },
+    () => { if (chrome.runtime.lastError) err("Context menu:", chrome.runtime.lastError.message); },
+  );
+  if (details.reason === "install") chrome.runtime.openOptionsPage();
 });
 
-chrome.contextMenus.onClicked.addListener((info, tab) => {
-  if (info.menuItemId === "equationeer-explain" && tab?.id) {
-    chrome.sidePanel.open({ tabId: tab.id });
-    // Small delay to let panel open, then send the selection
-    setTimeout(() => {
-      chrome.runtime.sendMessage({
-        type: "CONTEXT_MENU_EXPLAIN",
-        payload: { text: info.selectionText ?? "" },
-      });
-    }, 500);
-  }
+// ── Context menu ─────────────────────────────────────────────────────────────
+
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  if (info.menuItemId !== "equationeer-explain" || !tab?.id || !info.selectionText) return;
+  await chrome.storage.session.set({
+    equationeerPending: {
+      kind: "math",
+      math: info.selectionText,
+      surroundingText: info.selectionText,
+      pageTitle: tab.title ?? "",
+      pageUrl: tab.url ?? "",
+    },
+  });
+  await chrome.sidePanel.open({ tabId: tab.id });
 });
 
-// Keyboard shortcut
-chrome.commands.onCommand.addListener((command, tab) => {
+// ── Keyboard command ─────────────────────────────────────────────────────────
+
+chrome.commands.onCommand.addListener(async (command, tab) => {
+  log("Command:", command);
   if (command === "explain-selection" && tab?.id) {
-    chrome.sidePanel.open({ tabId: tab.id });
-    chrome.tabs.sendMessage(tab.id, { type: "TRIGGER_EXPLAIN" });
+    await chrome.sidePanel.open({ tabId: tab.id });
+    chrome.tabs.sendMessage(tab.id, { type: "TRIGGER_EXPLAIN" }).catch(() => {});
   }
 });
 
-// Message handler
+// ── Message handler ──────────────────────────────────────────────────────────
+
 chrome.runtime.onMessage.addListener(
-  (
-    message: AllMessages,
-    sender: chrome.runtime.MessageSender,
-    sendResponse: (response: unknown) => void,
-  ) => {
-    handleMessage(message, sender).then(sendResponse);
-    return true; // keep channel open for async
+  (message, sender, sendResponse) => {
+    log("Message:", message?.type);
+    handleMessage(message, sender)
+      .then(sendResponse)
+      .catch((e) => {
+        err("Handler threw:", e);
+        sendResponse({ error: String(e) });
+      });
+    return true;
   },
 );
 
 async function handleMessage(
-  message: AllMessages,
+  message: { type: string; payload?: unknown },
   sender: chrome.runtime.MessageSender,
 ): Promise<unknown> {
-  switch (message.type) {
+  switch (message?.type) {
+
     case "CAPTURE_TAB": {
-      const tabId = sender.tab?.id;
-      if (!tabId) return { error: "No tab found" };
+      if (!sender.tab?.windowId) return { error: "No window" };
       try {
         const dataUrl = await chrome.tabs.captureVisibleTab(
-          sender.tab!.windowId!,
-          { format: "png" },
+          sender.tab.windowId, { format: "png" },
         );
         return { dataUrl };
-      } catch (err) {
-        return { error: String(err) };
+      } catch (e) {
+        err("captureVisibleTab:", e);
+        return { error: String(e) };
       }
     }
 
     case "OPEN_SIDE_PANEL": {
       const tabId = sender.tab?.id;
-      if (tabId) {
-        await chrome.sidePanel.open({ tabId });
-      }
+      if (!tabId) return { error: "No tabId" };
+      try { await chrome.sidePanel.open({ tabId }); }
+      catch (e) { err("sidePanel.open:", e); return { error: String(e) }; }
       return { success: true };
     }
 
-    case "GET_SETTINGS": {
+    // Content script queues a pending explanation in session storage,
+    // then opens the side panel. The side panel reads this on mount.
+    case "QUEUE_PENDING": {
+      await chrome.storage.session.set({ equationeerPending: message.payload });
+      log("Queued pending explanation");
+      return { success: true };
+    }
+
+    case "GET_SETTINGS":
       return await getSettings();
-    }
 
-    case "SAVE_SETTINGS": {
-      return await saveSettings(message.payload);
-    }
+    case "SAVE_SETTINGS":
+      return await saveSettings(message.payload as Partial<Record<string, unknown>>);
 
-    case "VALIDATE_API_KEY": {
-      const valid = await validateApiKey(message.payload.apiKey);
-      return { valid };
-    }
+    case "VALIDATE_API_KEY":
+      return { valid: await validateApiKey((message.payload as { apiKey: string }).apiKey) };
 
-    case "EXPLAIN_MATH": {
-      if (isDebouncedTooSoon()) {
-        return { error: "Please wait a moment before making another request." };
-      }
-      if (isRateLimited()) {
-        return {
-          error: "Rate limit reached (30 requests/minute). Please wait.",
-        };
-      }
-      requestTimestamps.push(Date.now());
-
-      const settings = await getSettings();
-      if (!settings.apiKey) {
-        return { error: "API key not configured. Please set it in options." };
-      }
-
-      const { math, surroundingText, pageTitle, depth } = message.payload;
-      const systemPrompt = buildExplanationPrompt({
-        math,
-        surroundingText,
-        pageTitle,
-        depth,
+    case "EXPLAIN_MATH":
+      return await handleExplainMath(message.payload as {
+        math: string; surroundingText: string;
+        pageTitle: string; pageUrl: string; depth: string;
       });
 
-      void streamToSidePanel(settings.apiKey, systemPrompt, [
-        { role: "user" as const, content: math },
-      ]);
-      return { streaming: true };
-    }
-
-    case "EXPLAIN_IMAGE": {
-      if (isDebouncedTooSoon() || isRateLimited()) {
-        return { error: "Rate limited. Please wait." };
-      }
-      requestTimestamps.push(Date.now());
-
-      const settings = await getSettings();
-      if (!settings.apiKey) {
-        return { error: "API key not configured. Please set it in options." };
-      }
-
-      const systemPrompt = buildImageExplanationPrompt({
-        pageTitle: message.payload.pageTitle,
-        depth: message.payload.depth,
+    case "EXPLAIN_IMAGE":
+      return await handleExplainImage(message.payload as {
+        imageDataUrl: string; pageTitle: string; pageUrl: string; depth: string;
       });
 
-      void streamImageToSidePanel(
-        settings.apiKey,
-        systemPrompt,
-        message.payload.imageDataUrl,
-      );
-      return { streaming: true };
-    }
-
-    case "FOLLOW_UP": {
-      if (isDebouncedTooSoon() || isRateLimited()) {
-        return { error: "Rate limited. Please wait." };
-      }
-      requestTimestamps.push(Date.now());
-
-      const settings = await getSettings();
-      if (!settings.apiKey) {
-        return { error: "API key not configured." };
-      }
-
-      const { question, conversationHistory, originalMath, depth } =
-        message.payload;
-      const systemPrompt = buildFollowUpPrompt({ originalMath, depth });
-
-      const messages = [
-        ...conversationHistory.map((m) => ({
-          role: m.role as "user" | "assistant",
-          content: m.content,
-        })),
-        { role: "user" as const, content: question },
-      ];
-
-      void streamToSidePanel(settings.apiKey, systemPrompt, messages);
-      return { streaming: true };
-    }
+    case "FOLLOW_UP":
+      return await handleFollowUp(message.payload as {
+        question: string; conversationHistory: { role: string; content: string }[];
+        originalMath: string; depth: string;
+      });
 
     default:
+      log("Unknown message type:", message?.type);
       return { error: "Unknown message type" };
   }
 }
 
-async function streamToSidePanel(
-  apiKey: string,
-  systemPrompt: string,
-  messages: Array<{ role: "user" | "assistant"; content: string }>,
-): Promise<void> {
-  await streamExplanation(apiKey, systemPrompt, messages, (msg: StreamMessage) => {
-    chrome.runtime.sendMessage(msg).catch(() => {});
+// ── API call handlers ────────────────────────────────────────────────────────
+
+async function handleExplainMath(payload: {
+  math: string; surroundingText: string;
+  pageTitle: string; depth: string;
+}): Promise<unknown> {
+  const limitErr = rateLimitCheck();
+  if (limitErr) { broadcastError(limitErr); return { error: limitErr }; }
+
+  const settings = await getSettings();
+  if (!settings.apiKey) {
+    const msg = "No API key set. Open the Settings page to add your Anthropic key.";
+    broadcastError(msg);
+    return { error: msg };
+  }
+
+  const systemPrompt = buildExplanationPrompt({
+    math: payload.math,
+    surroundingText: payload.surroundingText,
+    pageTitle: payload.pageTitle,
+    depth: payload.depth as "grad" | "undergrad" | "curious",
   });
+
+  log("Starting Claude stream for math...");
+  streamExplanation(
+    settings.apiKey,
+    systemPrompt,
+    [{ role: "user", content: payload.math }],
+    broadcast,
+  ).catch((e) => { err(e); broadcastError(String(e)); });
+
+  return { streaming: true };
 }
 
-async function streamImageToSidePanel(
-  apiKey: string,
-  systemPrompt: string,
-  imageDataUrl: string,
-): Promise<void> {
-  await streamImageExplanation(apiKey, systemPrompt, imageDataUrl, (msg: StreamMessage) => {
-    chrome.runtime.sendMessage(msg).catch(() => {});
+async function handleExplainImage(payload: {
+  imageDataUrl: string; pageTitle: string; depth: string;
+}): Promise<unknown> {
+  const limitErr = rateLimitCheck();
+  if (limitErr) { broadcastError(limitErr); return { error: limitErr }; }
+
+  const settings = await getSettings();
+  if (!settings.apiKey) {
+    const msg = "No API key set.";
+    broadcastError(msg);
+    return { error: msg };
+  }
+
+  const systemPrompt = buildImageExplanationPrompt({
+    pageTitle: payload.pageTitle,
+    depth: payload.depth as "grad" | "undergrad" | "curious",
   });
+
+  log("Starting Claude stream for image...");
+  streamImageExplanation(settings.apiKey, systemPrompt, payload.imageDataUrl, broadcast)
+    .catch((e) => { err(e); broadcastError(String(e)); });
+
+  return { streaming: true };
+}
+
+async function handleFollowUp(payload: {
+  question: string; conversationHistory: { role: string; content: string }[];
+  originalMath: string; depth: string;
+}): Promise<unknown> {
+  const limitErr = rateLimitCheck();
+  if (limitErr) { broadcastError(limitErr); return { error: limitErr }; }
+
+  const settings = await getSettings();
+  if (!settings.apiKey) {
+    const msg = "No API key set.";
+    broadcastError(msg);
+    return { error: msg };
+  }
+
+  const systemPrompt = buildFollowUpPrompt({
+    originalMath: payload.originalMath,
+    depth: payload.depth as "grad" | "undergrad" | "curious",
+  });
+
+  const messages = [
+    ...payload.conversationHistory.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+    { role: "user" as const, content: payload.question },
+  ];
+
+  log("Starting Claude stream for follow-up...");
+  streamExplanation(settings.apiKey, systemPrompt, messages, broadcast)
+    .catch((e) => { err(e); broadcastError(String(e)); });
+
+  return { streaming: true };
 }
