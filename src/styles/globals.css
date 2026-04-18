@@ -1,0 +1,144 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --eq-bg-primary: #0f1117;
+    --eq-bg-secondary: #1a1d27;
+    --eq-bg-panel: #161924;
+    --eq-accent: #6c8eff;
+    --eq-accent-hover: #8ba4ff;
+    --eq-text-primary: #e8eaf0;
+    --eq-text-secondary: #8b90a0;
+    --eq-text-math: #ffd580;
+    --eq-border: #2a2d3e;
+    --eq-success: #4ade80;
+    --eq-error: #f87171;
+  }
+
+  .light {
+    --eq-bg-primary: #f8f9fc;
+    --eq-bg-secondary: #eef0f6;
+    --eq-bg-panel: #ffffff;
+    --eq-accent: #4a6cf7;
+    --eq-accent-hover: #3b5ae0;
+    --eq-text-primary: #1a1d27;
+    --eq-text-secondary: #5a5e6e;
+    --eq-text-math: #c47a00;
+    --eq-border: #d4d7e3;
+    --eq-success: #22c55e;
+    --eq-error: #ef4444;
+  }
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+code, pre, .font-mono {
+  font-family: "IBM Plex Mono", monospace;
+}
+
+/* Scrollbar styling for dark mode */
+.dark ::-webkit-scrollbar {
+  width: 6px;
+}
+
+.dark ::-webkit-scrollbar-track {
+  background: var(--eq-bg-primary);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: var(--eq-border);
+  border-radius: 3px;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: var(--eq-text-secondary);
+}
+
+/* Markdown rendering */
+.markdown-body h2 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--eq-accent);
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid var(--eq-border);
+}
+
+.markdown-body h2:first-child {
+  margin-top: 0;
+}
+
+.markdown-body p {
+  margin-bottom: 0.75rem;
+  line-height: 1.6;
+}
+
+.markdown-body strong {
+  color: var(--eq-text-math);
+  font-weight: 600;
+}
+
+.markdown-body code {
+  font-family: "IBM Plex Mono", monospace;
+  background: var(--eq-bg-secondary);
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  font-size: 0.9em;
+  color: var(--eq-text-math);
+}
+
+.markdown-body pre {
+  background: var(--eq-bg-secondary);
+  padding: 1rem;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin-bottom: 0.75rem;
+}
+
+.markdown-body pre code {
+  background: none;
+  padding: 0;
+}
+
+.markdown-body ul, .markdown-body ol {
+  padding-left: 1.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.markdown-body li {
+  margin-bottom: 0.25rem;
+  line-height: 1.6;
+}
+
+/* Skeleton loader animation */
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.8; }
+}
+
+.skeleton-line {
+  height: 0.875rem;
+  border-radius: 4px;
+  background: var(--eq-border);
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+}
+
+/* Smooth transitions */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,0 +1,78 @@
+/* Equationeer tooltip — injected into host page */
+#equationeer-tooltip {
+  position: absolute;
+  z-index: 2147483647;
+  pointer-events: auto;
+}
+
+#equationeer-tooltip button {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  color: #e8eaf0;
+  background: #161924;
+  border: 1px solid #2a2d3e;
+  border-radius: 20px;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3), 0 0 12px rgba(108, 142, 255, 0.15);
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+#equationeer-tooltip button:hover {
+  background: #1a1d27;
+  border-color: #6c8eff;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4), 0 0 20px rgba(108, 142, 255, 0.25);
+  transform: translateY(-1px);
+}
+
+#equationeer-tooltip button:focus-visible {
+  outline: 2px solid #6c8eff;
+  outline-offset: 2px;
+}
+
+#equationeer-tooltip .eq-sigma {
+  font-size: 15px;
+  color: #6c8eff;
+}
+
+/* Screenshot overlay */
+#equationeer-screenshot-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 2147483646;
+  cursor: crosshair;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+#equationeer-screenshot-selection {
+  position: fixed;
+  border: 2px solid #6c8eff;
+  background: rgba(108, 142, 255, 0.1);
+  z-index: 2147483647;
+  pointer-events: none;
+}
+
+#equationeer-screenshot-hint {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2147483647;
+  padding: 8px 20px;
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  font-size: 14px;
+  color: #e8eaf0;
+  background: #161924;
+  border: 1px solid #2a2d3e;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
