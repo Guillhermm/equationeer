@@ -24,6 +24,7 @@ function makeEntry(id: string, overrides: Partial<HistoryEntry> = {}): HistoryEn
     math: `f(x)=${id}`,
     explanation: `Explanation ${id}`,
     depth: "undergrad",
+    language: "English",
     pageTitle: "Test Page",
     pageUrl: "https://example.com",
     timestamp: Date.now(),

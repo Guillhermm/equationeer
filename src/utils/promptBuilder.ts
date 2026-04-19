@@ -26,12 +26,16 @@ function domainHint(pageUrl: string): string {
 export function buildExplanationPrompt(params: {
   math: string;
   surroundingText: string;
+  documentText?: string;
   pageTitle: string;
   pageUrl?: string;
   depth: ExplanationDepth;
   language?: string;
 }): string {
-  const { math, surroundingText, pageTitle, pageUrl = "", depth, language = "English" } = params;
+  const { math, surroundingText, documentText, pageTitle, pageUrl = "", depth, language = "English" } = params;
+  const docSection = documentText
+    ? `\n\n<document_excerpt>\n${documentText}\n</document_excerpt>\n\nUse the document excerpt to understand the notation, variables, and domain context specific to this paper or article. Let it inform every section of your explanation.`
+    : "";
   return `You are Equationeer, an expert mathematical educator specializing in making advanced mathematics deeply intuitive.
 
 The user is reading a research paper or technical document and has selected the following mathematical expression:
@@ -46,7 +50,7 @@ ${surroundingText.slice(0, 500)}
 
 <document_title>
 ${pageTitle}
-</document_title>${domainHint(pageUrl)}
+</document_title>${domainHint(pageUrl)}${docSection}
 
 <explanation_depth>
 ${DEPTH_LABELS[depth]}

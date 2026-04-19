@@ -28,7 +28,8 @@ const MODELS: { value: ClaudeModel; label: string; desc: string }[] = [
   { value: "claude-opus-4-7",           label: "Opus 4.7",   desc: "Most capable — deepest explanations, highest cost" },
 ];
 
-const MAX_TOKEN_OPTIONS = [512, 1024, 1500, 2048] as const;
+const MAX_TOKEN_OPTIONS = [512, 1024, 1500, 2048, 0] as const;
+const tokenLabel = (n: number) => n === 0 ? "Max" : String(n);
 
 const LANGUAGES = [
   "English", "Portuguese", "Spanish", "French", "German",
@@ -256,7 +257,7 @@ export function Options() {
           {/* Max Tokens */}
           <section className="bg-eq-bg-panel rounded-xl border border-eq-border p-5">
             <h2 className="text-sm font-semibold text-eq-text-primary mb-1">Response Length</h2>
-            <p className="text-xs text-eq-text-secondary mb-3">Maximum tokens per explanation. Lower = cheaper & faster; higher = more detail.</p>
+            <p className="text-xs text-eq-text-secondary mb-3">Maximum tokens per explanation. Lower = cheaper &amp; faster; "Max" uses the model's limit.</p>
             <div className="flex gap-2">
               {MAX_TOKEN_OPTIONS.map((n) => (
                 <button
@@ -264,11 +265,13 @@ export function Options() {
                   onClick={() => setSettings((s) => ({ ...s, maxTokens: n }))}
                   className={`flex-1 px-3 py-2 text-sm rounded-lg border transition-colors ${settings.maxTokens === n ? "border-eq-accent bg-eq-accent/10 text-eq-text-primary" : "border-eq-border text-eq-text-secondary hover:border-eq-accent/30"}`}
                 >
-                  {n}
+                  {tokenLabel(n)}
                 </button>
               ))}
             </div>
-            <p className="mt-2 text-xs text-eq-text-secondary/60">Selected: {settings.maxTokens} tokens</p>
+            <p className="mt-2 text-xs text-eq-text-secondary/60">
+              Selected: {settings.maxTokens === 0 ? "Max (model limit)" : `${settings.maxTokens} tokens`}
+            </p>
           </section>
 
           {/* Default Depth */}

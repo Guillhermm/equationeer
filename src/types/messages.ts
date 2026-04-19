@@ -5,6 +5,7 @@ export interface ExplainMathRequest {
   payload: {
     math: string;
     surroundingText: string;
+    documentText?: string;
     pageTitle: string;
     pageUrl: string;
     depth: ExplanationDepth;
@@ -55,6 +56,7 @@ export interface PendingExplanation {
   math?: string;
   imageDataUrl?: string;
   surroundingText?: string;
+  documentText?: string;
   pageTitle: string;
   pageUrl: string;
 }
@@ -116,6 +118,7 @@ export interface HistoryEntry {
   math: string;
   explanation: string;
   depth: ExplanationDepth;
+  language: string;
   pageTitle: string;
   pageUrl: string;
   timestamp: number;

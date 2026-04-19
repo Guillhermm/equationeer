@@ -88,6 +88,17 @@ describe("buildExplanationPrompt", () => {
     const p = buildExplanationPrompt({ ...base, pageUrl: "" });
     expect(p).not.toContain("page_domain");
   });
+
+  it("includes documentText in prompt when provided", () => {
+    const p = buildExplanationPrompt({ ...base, documentText: "This is the full document context." });
+    expect(p).toContain("document_excerpt");
+    expect(p).toContain("This is the full document context.");
+  });
+
+  it("omits document_excerpt when documentText is not provided", () => {
+    const p = buildExplanationPrompt({ ...base });
+    expect(p).not.toContain("document_excerpt");
+  });
 });
 
 describe("buildImageExplanationPrompt", () => {

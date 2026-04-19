@@ -26,6 +26,25 @@ function removeTooltip() {
   tooltipEl = null;
 }
 
+function getDocumentText(): string {
+  // Skip for PDFs — Chrome PDF viewer content is inaccessible from content scripts
+  if (
+    document.contentType === "application/pdf" ||
+    window.location.href.toLowerCase().endsWith(".pdf")
+  ) return "";
+  try {
+    // Prefer semantic content containers over the full body — they exclude nav,
+    // headers, footers, and ads which waste context window space.
+    const contentEl = document.querySelector<HTMLElement>(
+      "article, main, [role=main], .paper-body, .article-body, .ltx_document, #content, .content"
+    );
+    const source = contentEl ?? document.body;
+    return (source.innerText ?? "").slice(0, 8000);
+  } catch {
+    return "";
+  }
+}
+
 function triggerExplain() {
   const selection = window.getSelection();
   if (!selection || selection.isCollapsed) return;
@@ -34,6 +53,7 @@ function triggerExplain() {
   if (!text) return;
 
   const surroundingText = getSurroundingText(selection);
+  const documentText = getDocumentText();
 
   // Step 1: queue the pending explanation in session storage
   chrome.runtime.sendMessage({
@@ -42,6 +62,7 @@ function triggerExplain() {
       kind: "math",
       math: text,
       surroundingText,
+      documentText,
       pageTitle: document.title,
       pageUrl: window.location.href,
     },

@@ -122,6 +122,49 @@ code, pre, .font-mono {
   line-height: 1.6;
 }
 
+/* Tables */
+.markdown-body table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin-bottom: 0.75rem;
+  font-size: 0.8125rem;
+}
+
+.markdown-body th,
+.markdown-body td {
+  padding: 0.375rem 0.75rem;
+  border: 1px solid var(--eq-border);
+  text-align: left;
+  vertical-align: top;
+  line-height: 1.5;
+}
+
+.markdown-body th {
+  background: var(--eq-bg-secondary);
+  font-weight: 600;
+  color: var(--eq-text-math);
+  white-space: nowrap;
+}
+
+.markdown-body tbody tr:nth-child(even) td {
+  background: var(--eq-bg-secondary);
+}
+
+/* KaTeX overflow — prevent wide equations from breaking the panel layout */
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25rem 0;
+}
+
+.katex-display > .katex {
+  max-width: 100%;
+  text-align: left;
+}
+
 /* Skeleton loader animation */
 @keyframes skeleton-pulse {
   0%, 100% { opacity: 0.4; }

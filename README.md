@@ -6,10 +6,14 @@ A Chrome extension that turns any highlighted math equation into a deep, intuiti
 
 - **Highlight-to-Explain** — select any equation, click the floating `Σ Explain` tooltip (or press `Alt+E`)
 - **Screenshot Mode** — draw a rectangle over image-rendered math (PDFs, slides) and explain it via Claude Vision
-- **Three depth levels** — Grad / Undergrad / Curious, switchable per explanation
+- **Three depth levels** — Grad / Undergrad / Curious, switchable per explanation with ↺ re-explain
 - **Streaming output** — tokens appear as Claude generates them, no waiting for the full response
+- **LaTeX rendering** — KaTeX renders math in explanations, follow-up answers, and the equation preview
 - **Follow-up chat** — ask clarifying questions scoped to the current equation
-- **History** — every explanation is saved locally (IndexedDB); export as JSON or Markdown
+- **History** — every explanation is saved locally (IndexedDB) with depth and language metadata; export as JSON or Markdown
+- **Multi-language responses** — configure Claude to respond in 10+ languages; the active language is always shown in the side panel
+- **Document context** — for HTML pages, the page text is included alongside the equation for richer, context-aware explanations
+- **Configurable model & response length** — choose Haiku / Sonnet / Opus and set a token limit (512 → 2048 or "Max" for the model's full output limit)
 - **Dark / Light / System theme**
 
 ## Installation

@@ -10,6 +10,16 @@ import type { StreamMessage } from "../types/messages";
 const log = (...a: unknown[]) => console.log("[EQ:SW]", ...a);
 const err = (...a: unknown[]) => console.error("[EQ:SW]", ...a);
 
+const MODEL_MAX_TOKENS: Record<string, number> = {
+  "claude-haiku-4-5-20251001": 8096,
+  "claude-sonnet-4-6": 8096,
+  "claude-opus-4-7": 16000,
+};
+
+function resolveMaxTokens(model: string, maxTokens: number): number {
+  return maxTokens === 0 ? (MODEL_MAX_TOKENS[model] ?? 8096) : maxTokens;
+}
+
 // ── Rate limiting ────────────────────────────────────────────────────────────
 
 let timestamps: number[] = [];
@@ -57,15 +67,39 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   // sidePanel.open MUST be called synchronously in the user gesture context;
   // any await before it expires the gesture and silently fails.
   chrome.sidePanel.open({ tabId: tab.id }).catch((e) => err("sidePanel.open:", e));
-  chrome.storage.session.set({
-    equationeerPending: {
-      kind: "math",
-      math: info.selectionText,
-      surroundingText: info.selectionText,
-      pageTitle: tab.title ?? "",
-      pageUrl: tab.url ?? "",
+
+  const tabId = tab.id;
+  const pending = {
+    kind: "math" as const,
+    math: info.selectionText,
+    surroundingText: info.selectionText,
+    pageTitle: tab.title ?? "",
+    pageUrl: tab.url ?? "",
+  };
+
+  // Async: extract relevant page text and attach to the pending explanation.
+  // The panel's onChanged listener handles the pending even if it mounts first.
+  chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => {
+      try {
+        if (document.contentType === "application/pdf" ||
+            window.location.href.toLowerCase().endsWith(".pdf")) return "";
+        const el = document.querySelector<HTMLElement>(
+          "article, main, [role=main], .paper-body, .article-body, .ltx_document, #content, .content"
+        );
+        return ((el ?? document.body).innerText ?? "").slice(0, 8000);
+      } catch { return ""; }
     },
-  }).catch((e) => err("storage.session.set:", e));
+  }).then((results) => {
+    const documentText = (results?.[0]?.result as string) || undefined;
+    chrome.storage.session.set({ equationeerPending: { ...pending, documentText } })
+      .catch((e) => err("storage.session.set:", e));
+  }).catch(() => {
+    // Fallback: queue without document text
+    chrome.storage.session.set({ equationeerPending: pending })
+      .catch((e) => err("storage.session.set:", e));
+  });
 });
 
 // ── Keyboard command ─────────────────────────────────────────────────────────
@@ -137,7 +171,7 @@ async function handleMessage(
 
     case "EXPLAIN_MATH":
       return await handleExplainMath(message.payload as {
-        math: string; surroundingText: string;
+        math: string; surroundingText: string; documentText?: string;
         pageTitle: string; pageUrl: string; depth: string;
       });
 
@@ -161,7 +195,7 @@ async function handleMessage(
 // ── API call handlers ────────────────────────────────────────────────────────
 
 async function handleExplainMath(payload: {
-  math: string; surroundingText: string;
+  math: string; surroundingText: string; documentText?: string;
   pageTitle: string; pageUrl: string; depth: string;
 }): Promise<unknown> {
   const limitErr = rateLimitCheck();
@@ -177,19 +211,21 @@ async function handleExplainMath(payload: {
   const systemPrompt = buildExplanationPrompt({
     math: payload.math,
     surroundingText: payload.surroundingText,
+    documentText: payload.documentText,
     pageTitle: payload.pageTitle,
     pageUrl: payload.pageUrl,
     depth: payload.depth as "grad" | "undergrad" | "curious",
     language: settings.language,
   });
 
-  log("Starting Claude stream for math, model:", settings.model);
+  const maxTokens = resolveMaxTokens(settings.model, settings.maxTokens);
+  log("Starting Claude stream for math, model:", settings.model, "maxTokens:", maxTokens);
   streamExplanation(
     settings.apiKey,
     systemPrompt,
     [{ role: "user", content: payload.math }],
     broadcast,
-    { model: settings.model, maxTokens: settings.maxTokens },
+    { model: settings.model, maxTokens },
   ).catch((e) => { err(e); broadcastError(String(e)); });
 
   return { streaming: true };
@@ -215,13 +251,14 @@ async function handleExplainImage(payload: {
     language: settings.language,
   });
 
-  log("Starting Claude stream for image, model:", settings.model);
+  const maxTokensImg = resolveMaxTokens(settings.model, settings.maxTokens);
+  log("Starting Claude stream for image, model:", settings.model, "maxTokens:", maxTokensImg);
   streamImageExplanation(
     settings.apiKey,
     systemPrompt,
     payload.imageDataUrl,
     broadcast,
-    { model: settings.model, maxTokens: settings.maxTokens },
+    { model: settings.model, maxTokens: maxTokensImg },
   ).catch((e) => { err(e); broadcastError(String(e)); });
 
   return { streaming: true };
@@ -252,13 +289,14 @@ async function handleFollowUp(payload: {
     { role: "user" as const, content: payload.question },
   ];
 
-  log("Starting Claude stream for follow-up, model:", settings.model);
+  const maxTokensFu = resolveMaxTokens(settings.model, settings.maxTokens);
+  log("Starting Claude stream for follow-up, model:", settings.model, "maxTokens:", maxTokensFu);
   streamExplanation(
     settings.apiKey,
     systemPrompt,
     messages,
     broadcast,
-    { model: settings.model, maxTokens: settings.maxTokens },
+    { model: settings.model, maxTokens: maxTokensFu },
   ).catch((e) => { err(e); broadcastError(String(e)); });
 
   return { streaming: true };

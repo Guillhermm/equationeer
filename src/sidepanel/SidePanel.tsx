@@ -21,24 +21,45 @@ import {
 type View = "explanation" | "history";
 
 // ── KaTeX pre-processor ────────────────────────────────────────────────────────
-// Replaces $$...$$ and $...$ in markdown with rendered KaTeX HTML before marked
-// processes the rest. Marked passes HTML through unchanged.
+// Converts all common LaTeX delimiter styles to KaTeX HTML before marked runs.
+// Order matters: display environments before display delimiters before inline.
 function renderLatex(text: string): string {
-  // Display math first to avoid conflicting with inline pass
-  let result = text.replace(/\$\$([\s\S]+?)\$\$/g, (_, math: string) => {
+  const render = (math: string, displayMode: boolean, fallback: string): string => {
     try {
-      return katex.renderToString(math.trim(), { displayMode: true, throwOnError: false, output: "html" });
+      return katex.renderToString(math.trim(), { displayMode, throwOnError: false, output: "html" });
     } catch {
-      return `$$${math}$$`;
+      return fallback;
     }
-  });
-  result = result.replace(/\$([^$\n]+?)\$/g, (_, math: string) => {
-    try {
-      return katex.renderToString(math.trim(), { displayMode: false, throwOnError: false, output: "html" });
-    } catch {
-      return `$${math}$`;
-    }
-  });
+  };
+
+  let result = text;
+
+  // 1. \begin{equation|align|...}...\end{...}  →  display
+  result = result.replace(
+    /\\begin\{(equation|align|aligned|gather|multline|eqnarray)\*?\}([\s\S]+?)\\end\{(?:equation|align|aligned|gather|multline|eqnarray)\*?\}/g,
+    (match) => render(match, true, match),
+  );
+
+  // 2. \[...\]  →  display
+  result = result.replace(/\\\[([\s\S]+?)\\\]/g, (match, math: string) =>
+    render(math, true, match),
+  );
+
+  // 3. $$...$$  →  display  (before single-$ to avoid mis-matching)
+  result = result.replace(/\$\$([\s\S]+?)\$\$/g, (match, math: string) =>
+    render(math, true, match),
+  );
+
+  // 4. \(...\)  →  inline
+  result = result.replace(/\\\((.+?)\\\)/gs, (match, math: string) =>
+    render(math, false, match),
+  );
+
+  // 5. $...$  →  inline  (last, most easily mis-triggered)
+  result = result.replace(/\$([^$\n]+?)\$/g, (match, math: string) =>
+    render(math, false, match),
+  );
+
   return result;
 }
 
@@ -62,10 +83,14 @@ export function SidePanel() {
   const [currentEntryId, setCurrentEntryId] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+  const [language, setLanguage] = useState("English");
+  const [currentDocumentText, setCurrentDocumentText] = useState("");
   const explanationRef = useRef<HTMLDivElement>(null);
   const streamingTextRef = useRef("");
   const depthRef = useRef<ExplanationDepth>(depth);
   depthRef.current = depth;
+  const languageRef = useRef(language);
+  languageRef.current = language;
 
   // ── Load settings ──────────────────────────────────────────────────────────
 
@@ -74,6 +99,7 @@ export function SidePanel() {
       if (chrome.runtime.lastError) return;
       if (settings?.defaultDepth) setDepth(settings.defaultDepth);
       if (settings?.theme) applyTheme(settings.theme);
+      if (settings?.language) setLanguage(settings.language);
     });
   }, []);
 
@@ -89,6 +115,7 @@ export function SidePanel() {
       setCurrentPageUrl(pending.pageUrl);
       setIsImage(false);
       setCurrentImageDataUrl("");
+      setCurrentDocumentText(pending.documentText ?? "");
       setExplanation("");
       setError(null);
       setConversation([]);
@@ -102,6 +129,7 @@ export function SidePanel() {
         payload: {
           math: pending.math,
           surroundingText: pending.surroundingText ?? "",
+          documentText: pending.documentText,
           pageTitle: pending.pageTitle,
           pageUrl: pending.pageUrl,
           depth: d,
@@ -113,6 +141,7 @@ export function SidePanel() {
       setCurrentPageUrl(pending.pageUrl);
       setIsImage(true);
       setCurrentImageDataUrl(pending.imageDataUrl);
+      setCurrentDocumentText("");
       setExplanation("");
       setError(null);
       setConversation([]);
@@ -151,6 +180,8 @@ export function SidePanel() {
             setCurrentPageTitle(last.pageTitle);
             setCurrentPageUrl(last.pageUrl);
             setIsImage(last.isImage);
+            setDepth(last.depth);
+            setLanguage(last.language || "English");
           }
         });
       }
@@ -207,6 +238,7 @@ export function SidePanel() {
           math: currentMathRef.current,
           explanation: message.fullText,
           depth: depthRef.current,
+          language: languageRef.current,
           pageTitle: currentPageTitleRef.current,
           pageUrl: currentPageUrlRef.current,
           timestamp: Date.now(),
@@ -277,7 +309,7 @@ export function SidePanel() {
     } else {
       chrome.runtime.sendMessage({
         type: "EXPLAIN_MATH",
-        payload: { math: currentMath, surroundingText: "", pageTitle: currentPageTitle, pageUrl: currentPageUrl, depth },
+        payload: { math: currentMath, surroundingText: "", documentText: currentDocumentText, pageTitle: currentPageTitle, pageUrl: currentPageUrl, depth },
       });
     }
   };
@@ -353,16 +385,24 @@ export function SidePanel() {
               {depthLabels[d]}
             </button>
           ))}
-          {canReExplain && (
-            <button
-              onClick={reExplain}
-              className="ml-auto px-2 py-1 text-xs rounded border border-eq-border text-eq-text-secondary hover:text-eq-text-primary hover:border-eq-accent/40 transition-colors"
-              aria-label="Re-explain with current depth"
-              title="Re-explain at current depth"
+          <span className="ml-auto flex items-center gap-1.5">
+            <span
+              className="px-2 py-0.5 text-xs rounded-full bg-eq-bg-primary text-eq-text-secondary border border-eq-border"
+              title="Response language"
             >
-              ↺
-            </button>
-          )}
+              {language}
+            </span>
+            {canReExplain && (
+              <button
+                onClick={reExplain}
+                className="px-2 py-1 text-xs rounded border border-eq-border text-eq-text-secondary hover:text-eq-text-primary hover:border-eq-accent/40 transition-colors"
+                aria-label="Re-explain with current depth"
+                title="Re-explain at current depth"
+              >
+                ↺
+              </button>
+            )}
+          </span>
         </div>
       )}
 
@@ -380,6 +420,9 @@ export function SidePanel() {
               setCurrentPageUrl(entry.pageUrl);
               setIsImage(entry.isImage);
               setCurrentImageDataUrl("");
+              setCurrentDocumentText("");
+              setDepth(entry.depth);
+              setLanguage(entry.language || "English");
               setView("explanation");
             }}
             onToggleBookmark={async (id) => { await toggleBookmark(id); loadHistory(); }}
@@ -394,9 +437,10 @@ export function SidePanel() {
             {currentMath && !isImage && (
               <div className="mb-3 p-3 rounded-lg bg-eq-bg-secondary border border-eq-border">
                 <p className="text-xs text-eq-text-secondary mb-1">Selected equation:</p>
-                <p className="text-sm font-mono text-eq-text-math break-all">
-                  {currentMath.slice(0, 200)}{currentMath.length > 200 && "..."}
-                </p>
+                <div
+                  className="text-sm font-mono text-eq-text-math break-all overflow-x-auto"
+                  dangerouslySetInnerHTML={{ __html: renderLatex(currentMath.slice(0, 200)) + (currentMath.length > 200 ? "…" : "") }}
+                />
               </div>
             )}
 
@@ -532,6 +576,10 @@ function SkeletonLoader() {
   );
 }
 
+const DEPTH_SHORT: Record<string, string> = {
+  grad: "Grad", undergrad: "Undergrad", curious: "Curious",
+};
+
 function HistoryView({
   history, onSelect, onToggleBookmark, onDelete, onExportJson, onExportMd,
 }: {
@@ -563,14 +611,22 @@ function HistoryView({
             >
               <div className="flex items-start justify-between">
                 <p className="text-xs font-mono text-eq-text-math truncate flex-1 mr-2">{entry.math.slice(0, 60)}</p>
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
                   <button onClick={(e) => { e.stopPropagation(); onToggleBookmark(entry.id); }} className="p-1 text-xs" aria-label="Bookmark">{entry.bookmarked ? "★" : "☆"}</button>
                   <button onClick={(e) => { e.stopPropagation(); onDelete(entry.id); }} className="p-1 text-xs text-eq-error" aria-label="Delete">&times;</button>
                 </div>
               </div>
-              <p className="text-xs text-eq-text-secondary mt-1">
-                {entry.pageTitle.slice(0, 40)} &middot; {new Date(entry.timestamp).toLocaleDateString()}
-              </p>
+              <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                <span className="px-1.5 py-0.5 text-[10px] leading-none rounded bg-eq-accent/10 text-eq-accent border border-eq-accent/20 font-medium">
+                  {DEPTH_SHORT[entry.depth] ?? entry.depth}
+                </span>
+                <span className="px-1.5 py-0.5 text-[10px] leading-none rounded bg-eq-bg-primary text-eq-text-secondary border border-eq-border">
+                  {entry.language || "English"}
+                </span>
+                <span className="text-[10px] text-eq-text-secondary/70 truncate min-w-0">
+                  {entry.pageTitle.slice(0, 30)}{entry.pageTitle.length > 30 ? "…" : ""}&thinsp;&middot;&thinsp;{new Date(entry.timestamp).toLocaleDateString()}
+                </span>
+              </div>
             </div>
           ))}
         </div>
