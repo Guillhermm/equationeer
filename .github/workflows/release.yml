@@ -1,10 +1,8 @@
-name: CI
+name: Release
 
 on:
   push:
-    branches: [main, master]
-  pull_request:
-    branches: [main, master]
+    tags: ['v*']
 
 jobs:
   lint:
@@ -44,9 +42,22 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - run: npm ci
-      - run: npm run test:coverage
-      - uses: actions/upload-artifact@v4
-        if: always()
+      - run: npm test
+
+  build:
+    name: Build extension
+    runs-on: ubuntu-latest
+    needs: [lint, typecheck, test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          name: coverage
-          path: coverage/
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: equationeer-${{ github.ref_name }}
+          path: dist/
