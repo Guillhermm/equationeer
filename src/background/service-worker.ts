@@ -102,16 +102,6 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   });
 });
 
-// ── Keyboard command ─────────────────────────────────────────────────────────
-
-chrome.commands.onCommand.addListener(async (command, tab) => {
-  log("Command:", command);
-  if (command === "explain-selection" && tab?.id) {
-    await chrome.sidePanel.open({ tabId: tab.id });
-    chrome.tabs.sendMessage(tab.id, { type: "TRIGGER_EXPLAIN" }).catch(() => {});
-  }
-});
-
 // ── Message handler ──────────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener(

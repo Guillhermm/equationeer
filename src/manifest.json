@@ -40,22 +40,6 @@
   "host_permissions": [
     "<all_urls>"
   ],
-  "commands": {
-    "explain-selection": {
-      "suggested_key": {
-        "default": "Alt+E",
-        "mac": "Alt+E"
-      },
-      "description": "Explain selected math equation"
-    },
-    "_execute_action": {
-      "suggested_key": {
-        "default": "Alt+Shift+E",
-        "mac": "Alt+Shift+E"
-      },
-      "description": "Open Equationeer popup"
-    }
-  },
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'"
   }

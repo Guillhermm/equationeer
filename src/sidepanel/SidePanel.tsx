@@ -552,8 +552,7 @@ function EmptyState() {
       <h2 className="text-lg font-semibold text-eq-text-primary mb-2">Ready to explain</h2>
       <p className="text-sm text-eq-text-secondary mb-4 max-w-xs">
         Select any math equation on a webpage and click the{" "}
-        <span className="font-mono text-eq-text-math">&Sigma; Explain</span> button,
-        or press <kbd className="px-1.5 py-0.5 rounded bg-eq-bg-secondary border border-eq-border text-xs">Alt+E</kbd>.
+        <span className="font-mono text-eq-text-math">&Sigma; Explain</span> button that appears near your selection.
       </p>
       <p className="text-xs text-eq-text-secondary/60">
         For PDFs and image-based equations, use Screenshot Mode from the toolbar popup.

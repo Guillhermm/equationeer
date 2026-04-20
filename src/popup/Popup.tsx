@@ -81,7 +81,7 @@ export function Popup() {
 
       <div className="mt-4 pt-3 border-t border-eq-border">
         <p className="text-xs text-eq-text-secondary/60 text-center">
-          Select math on any page &rarr; <kbd className="px-1 py-0.5 rounded bg-eq-bg-secondary border border-eq-border text-[10px]">Alt+E</kbd>
+          Select math on any page &rarr; click &ldquo;&Sigma; Explain&rdquo;
         </p>
       </div>
     </div>
