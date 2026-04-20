@@ -1,26 +1,53 @@
 import { useState, useEffect } from "react";
+import { marked } from "marked";
+import katex from "katex";
+import "katex/dist/katex.min.css";
 import type { AppSettings, ClaudeModel, ExplanationDepth } from "../types/messages";
 
+function renderLatex(text: string): string {
+  const render = (math: string, displayMode: boolean, fallback: string): string => {
+    try {
+      return katex.renderToString(math.trim(), { displayMode, throwOnError: false, output: "html" });
+    } catch {
+      return fallback;
+    }
+  };
+  let result = text;
+  result = result.replace(
+    /\\begin\{(equation|align|aligned|gather|multline|eqnarray)\*?\}([\s\S]+?)\\end\{(?:equation|align|aligned|gather|multline|eqnarray)\*?\}/g,
+    (match) => render(match, true, match),
+  );
+  result = result.replace(/\\\[([\s\S]+?)\\\]/g, (match, math: string) => render(math, true, match));
+  result = result.replace(/\$\$([\s\S]+?)\$\$/g, (match, math: string) => render(math, true, match));
+  result = result.replace(/\\\((.+?)\\\)/gs, (match, math: string) => render(math, false, match));
+  result = result.replace(/\$([^$\n]+?)\$/g, (match, math: string) => render(math, false, match));
+  return result;
+}
+
+function renderMarkdown(md: string): { __html: string } {
+  return { __html: marked.parse(renderLatex(md), { async: false }) as string };
+}
+
 const MOCK_EXPLANATION = `## What This Represents
-This is the Euler identity, widely considered the most beautiful equation in mathematics. It links five fundamental constants: e, i, \u03C0, 1, and 0.
+This is the Euler identity, widely considered the most beautiful equation in mathematics. It links five fundamental constants: $e$, $i$, $\\pi$, $1$, and $0$.
 
 ## Term-by-Term Breakdown
-- **e** \u2014 Euler's number (\u22482.718), the base of natural logarithms
-- **i** \u2014 The imaginary unit, defined as \u221A(-1)
-- **\u03C0** \u2014 Pi (\u22483.14159), the ratio of a circle's circumference to its diameter
+- **e** \u2014 Euler's number ($\\approx 2.718$), the base of natural logarithms
+- **i** \u2014 The imaginary unit, defined as $\\sqrt{-1}$
+- **\u03C0** \u2014 Pi ($\\approx 3.14159$), the ratio of a circle's circumference to its diameter
 - **+1** \u2014 The multiplicative identity
 - **= 0** \u2014 The additive identity
 
 ## The Intuition
-Imagine walking along the unit circle in the complex plane. Starting at 1, if you rotate by \u03C0 radians (half a full turn), you arrive at -1. Adding 1 gives 0. The equation encodes this geometric fact algebraically.
+Imagine walking along the unit circle in the complex plane. Starting at $1$, if you rotate by $\\pi$ radians (half a full turn), you arrive at $-1$. Adding $1$ gives $0$. The equation encodes this geometric fact algebraically.
 
 ## Key Assumptions
 Relies on the extension of the exponential function to complex numbers via the Taylor series.
 
 ## Related Concepts
-- **Euler's Formula** \u2014 The general form: e^(ix) = cos(x) + i\u00B7sin(x)
+- **Euler's Formula** \u2014 The general form: $e^{ix} = \\cos(x) + i \\cdot \\sin(x)$
 - **Complex Plane** \u2014 The 2D number system where real and imaginary parts form axes
-- **Taylor Series** \u2014 The infinite polynomial expansion that connects e^x to trig functions`;
+- **Taylor Series** \u2014 The infinite polynomial expansion that connects $e^x$ to trig functions`;
 
 const MODELS: { value: ClaudeModel; label: string; desc: string }[] = [
   { value: "claude-haiku-4-5-20251001", label: "Haiku 4.5", desc: "Fastest & cheapest — great for quick lookups" },
@@ -187,7 +214,11 @@ export function Options() {
                 <h2 className="text-lg font-semibold text-eq-text-primary mb-2">Step 4: Try It Out</h2>
                 <p className="text-sm text-eq-text-secondary mb-4">Here's what an explanation looks like:</p>
                 <div className="mb-4 p-3 rounded-lg bg-eq-bg-secondary border border-eq-border">
-                  <p className="text-sm font-mono text-eq-text-math">e^(i&pi;) + 1 = 0</p>
+                  <p className="text-xs text-eq-text-secondary mb-1">Selected equation:</p>
+                  <div
+                    className="overflow-x-auto"
+                    dangerouslySetInnerHTML={{ __html: renderLatex("$e^{i\\pi} + 1 = 0$") }}
+                  />
                 </div>
                 {!showMockDemo ? (
                   <button onClick={() => setShowMockDemo(true)} className="w-full px-3 py-2.5 text-sm bg-eq-accent text-white rounded-lg hover:bg-eq-accent-hover transition-colors">
@@ -195,7 +226,7 @@ export function Options() {
                   </button>
                 ) : (
                   <div className="mt-3 p-4 rounded-lg bg-eq-bg-panel border border-eq-border max-h-64 overflow-y-auto">
-                    <div className="text-sm text-eq-text-primary whitespace-pre-wrap leading-relaxed">{MOCK_EXPLANATION}</div>
+                    <div className="text-sm markdown-body" dangerouslySetInnerHTML={renderMarkdown(MOCK_EXPLANATION)} />
                   </div>
                 )}
                 <button onClick={finishOnboarding} className="mt-4 w-full px-3 py-2 text-sm bg-eq-accent text-white rounded-lg hover:bg-eq-accent-hover transition-colors">

@@ -610,7 +610,10 @@ function HistoryView({
               onClick={() => onSelect(entry)}
             >
               <div className="flex items-start justify-between">
-                <p className="text-xs font-mono text-eq-text-math truncate flex-1 mr-2">{entry.math.slice(0, 60)}</p>
+                <div
+                  className="text-xs text-eq-text-math overflow-hidden max-h-8 flex-1 mr-2 leading-tight"
+                  dangerouslySetInnerHTML={{ __html: renderLatex(entry.math.slice(0, 100)) }}
+                />
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
                   <button onClick={(e) => { e.stopPropagation(); onToggleBookmark(entry.id); }} className="p-1 text-xs" aria-label="Bookmark">{entry.bookmarked ? "★" : "☆"}</button>
                   <button onClick={(e) => { e.stopPropagation(); onDelete(entry.id); }} className="p-1 text-xs text-eq-error" aria-label="Delete">&times;</button>
