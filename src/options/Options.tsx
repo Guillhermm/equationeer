@@ -230,7 +230,7 @@ export function Options() {
                   </div>
                 )}
                 <button onClick={finishOnboarding} className="mt-4 w-full px-3 py-2 text-sm bg-eq-accent text-white rounded-lg hover:bg-eq-accent-hover transition-colors">
-                  Done &mdash; Start Using Equationeer
+                  Done, Start Using Equationeer
                 </button>
               </div>
             )}
