@@ -4,7 +4,7 @@ A Chrome extension that turns any highlighted math equation into a deep, intuiti
 
 ## Features
 
-- **Highlight-to-Explain** — select any equation, click the floating `Σ Explain` tooltip (or press `Alt+E`)
+- **Highlight-to-Explain** — select any equation on a webpage or text-based PDF, click the floating `Σ Explain` tooltip that appears
 - **Screenshot Mode** — draw a rectangle over image-rendered math (PDFs, slides) and explain it via Claude Vision
 - **Three depth levels** — Grad / Undergrad / Curious, switchable per explanation with ↺ re-explain
 - **Streaming output** — tokens appear as Claude generates them, no waiting for the full response
@@ -38,7 +38,7 @@ npm run build       # outputs to dist/
 
 On `chrome://extensions`, click **Details** under Equationeer → enable **Allow access to file URLs**.
 
-> Note: Chrome's built-in PDF viewer runs in an isolated context — content scripts cannot access the PDF DOM. Use **Screenshot Mode** for PDFs regardless.
+> Note: For text-based PDFs, select text normally and click **Σ Explain**. For image-based PDFs (equations rendered as images), use **Screenshot Mode**.
 
 ## Getting an API key
 
@@ -52,22 +52,18 @@ Your key is stored in `chrome.storage.local` (encrypted at rest by Chrome) and i
 
 ### Text selection
 
-1. Select any math on a webpage
+1. Select any math on a webpage or text-based PDF open in Chrome
 2. Click the **Σ Explain** pill that appears above the selection
-   — or press **Alt+E** to explain the current selection without the tooltip
 
-### Screenshot Mode (PDFs and rendered images)
+### Screenshot Mode (image-based equations)
 
-1. Click the Equationeer icon in the toolbar → **Screenshot Mode**
-2. Drag a rectangle over the equation on screen
-3. The cropped image is sent to Claude with vision; explanation streams into the side panel
+Use this for equations rendered as images — e.g. image-based PDFs, scanned papers, or slides.
 
-### Keyboard shortcuts
-
-| Shortcut | Action |
-|---|---|
-| `Alt+E` | Explain current text selection |
-| `Alt+Shift+E` | Open the Equationeer popup |
+1. **Open the PDF or page in Chrome** (the screenshot captures the current tab)
+2. Click the Equationeer icon in the toolbar → **Screenshot Mode**
+3. Drag a rectangle over the equation
+4. Release — the cropped image is sent to Claude Vision; the explanation streams into the side panel
+5. Press **Esc** to cancel without capturing
 
 ## Architecture
 
@@ -108,7 +104,7 @@ npm run build   # Production build → dist/
 |---|---|---|
 | Service worker | `chrome://extensions` → "service worker" link | `[EQ:SW]` |
 | Side panel | Right-click inside panel → Inspect | `[EQ:SP]` |
-| Content script | DevTools on the target page → Console | `[EQ:api]` |
+| Content script | DevTools on the target page → Console | `[EQ:content]` |
 | Popup / Options | Right-click the page → Inspect | — |
 
 ## Troubleshooting
@@ -122,9 +118,10 @@ npm run build   # Production build → dist/
 - Refresh the page — content scripts are injected on page load, not on extension reload
 - Some pages block content scripts (Chrome internal pages, Web Store, etc.)
 
-**PDF text selection doesn't work**
-- Chrome's native PDF viewer isolates its DOM from content scripts. Use **Screenshot Mode** instead
-- For `file://` PDFs, also ensure "Allow access to file URLs" is enabled in the extension details
+**Equations in a PDF aren't explained**
+- For text-based PDFs: select the equation text normally — the **Σ Explain** tooltip should appear. If not, refresh the page and try again.
+- For image-based PDFs (equations rendered as graphics): use **Screenshot Mode** — open the PDF in Chrome, click the toolbar icon → Screenshot Mode, and draw over the equation.
+- For local (`file://`) PDFs: ensure "Allow access to file URLs" is enabled under the extension Details page in `chrome://extensions`.
 
 **"API 400" error in the panel**
 - Usually a wrong or revoked API key — re-validate in Settings
