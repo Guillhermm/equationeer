@@ -56,20 +56,30 @@ export function Popup() {
         </div>
       )}
 
-      <div className="space-y-2">
-        <button
-          onClick={openSidePanel}
-          className="w-full px-3 py-2.5 text-sm font-medium bg-eq-accent text-white rounded-lg hover:bg-eq-accent-hover transition-colors"
-        >
-          Open Explanation Panel
-        </button>
+      <div className="space-y-3">
+        <div>
+          <button
+            onClick={openSidePanel}
+            className="w-full px-3 py-2.5 text-sm font-medium bg-eq-accent text-white rounded-lg hover:bg-eq-accent-hover transition-colors"
+          >
+            Open Explanation Panel
+          </button>
+          <p className="text-xs text-eq-text-secondary/60 mt-1.5 px-1">
+            Highlight any math on a webpage or text-based PDF, then click the &ldquo;&Sigma;&thinsp;Explain&rdquo; button that appears.
+          </p>
+        </div>
 
-        <button
-          onClick={activateScreenshot}
-          className="w-full px-3 py-2.5 text-sm font-medium bg-eq-bg-secondary text-eq-text-primary border border-eq-border rounded-lg hover:border-eq-accent/30 transition-colors"
-        >
-          Screenshot Mode
-        </button>
+        <div>
+          <button
+            onClick={activateScreenshot}
+            className="w-full px-3 py-2.5 text-sm font-medium bg-eq-bg-secondary text-eq-text-primary border border-eq-border rounded-lg hover:border-eq-accent/30 transition-colors"
+          >
+            Screenshot Mode
+          </button>
+          <p className="text-xs text-eq-text-secondary/60 mt-1.5 px-1">
+            For image-based equations. Open the PDF in Chrome first, then draw a rectangle over the equation.
+          </p>
+        </div>
 
         <button
           onClick={() => chrome.runtime.openOptionsPage()}
@@ -77,12 +87,6 @@ export function Popup() {
         >
           Settings
         </button>
-      </div>
-
-      <div className="mt-4 pt-3 border-t border-eq-border">
-        <p className="text-xs text-eq-text-secondary/60 text-center">
-          Select math on any page &rarr; click &ldquo;&Sigma; Explain&rdquo;
-        </p>
       </div>
     </div>
   );

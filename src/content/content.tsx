@@ -107,6 +107,9 @@ function activateScreenshotMode() {
 
   screenshotOverlay = document.createElement("div");
   screenshotOverlay.id = "equationeer-screenshot-overlay";
+  // Must be focusable so keyboard events (Esc) reach it even when a PDF
+  // viewer iframe or embed is holding focus.
+  screenshotOverlay.tabIndex = -1;
 
   const hint = document.createElement("div");
   hint.id = "equationeer-screenshot-hint";
@@ -114,6 +117,7 @@ function activateScreenshotMode() {
 
   document.body.appendChild(screenshotOverlay);
   document.body.appendChild(hint);
+  screenshotOverlay.focus();
 
   let startX = 0, startY = 0;
   let selectionBox: HTMLDivElement | null = null;
@@ -145,6 +149,7 @@ function activateScreenshotMode() {
   };
 
   screenshotOverlay.addEventListener("mousedown", onMouseDown);
+  screenshotOverlay.addEventListener("keydown", onKeyDown);
   document.addEventListener("mousemove", onMouseMove);
   document.addEventListener("mouseup", onMouseUp);
   document.addEventListener("keydown", onKeyDown);
