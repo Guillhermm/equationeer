@@ -2,7 +2,17 @@ import { useState, useEffect } from "react";
 import { marked } from "marked";
 import katex from "katex";
 import "katex/dist/katex.min.css";
-import type { AppSettings, ClaudeModel, ExplanationDepth } from "../types/messages";
+import type { AppSettings, ExplanationDepth } from "../types/messages";
+import {
+  BUNDLED_MODELS,
+  DEFAULT_MODEL,
+  MAX_OUTPUT_CEILING,
+  describeModel,
+  findModel,
+  type ModelCatalog,
+} from "../utils/models";
+import { DEFAULT_SETTINGS } from "../utils/settings";
+import { normalizeHost, type ActivationScope, type TooltipScope } from "../utils/siteScope";
 
 function renderLatex(text: string): string {
   const render = (math: string, displayMode: boolean, fallback: string): string => {
@@ -49,10 +59,16 @@ Relies on the extension of the exponential function to complex numbers via the T
 - **Complex Plane** \u2014 The 2D number system where real and imaginary parts form axes
 - **Taylor Series** \u2014 The infinite polynomial expansion that connects $e^x$ to trig functions`;
 
-const MODELS: { value: ClaudeModel; label: string; desc: string }[] = [
-  { value: "claude-haiku-4-5-20251001", label: "Haiku 4.5", desc: "Fastest & cheapest — great for quick lookups" },
-  { value: "claude-sonnet-4-6",         label: "Sonnet 4.6", desc: "Balanced — best quality/cost ratio (recommended)" },
-  { value: "claude-opus-4-7",           label: "Opus 4.7",   desc: "Most capable — deepest explanations, highest cost" },
+const ACTIVATION_OPTIONS: { value: ActivationScope; label: string; desc: string }[] = [
+  { value: "pdf", label: "PDFs only", desc: "Every other page behaves as if the extension were not installed" },
+  { value: "allowlist", label: "PDFs + chosen sites", desc: "Add a site from the toolbar popup, or below" },
+  { value: "all", label: "All pages", desc: "Equationeer attaches everywhere" },
+];
+
+const TOOLTIP_OPTIONS: { value: TooltipScope; label: string; desc: string }[] = [
+  { value: "pdf", label: "PDFs only", desc: "The pill appears when reading a PDF" },
+  { value: "all", label: "Everywhere active", desc: "The pill appears on every page Equationeer runs on" },
+  { value: "off", label: "Never", desc: "Use the right-click menu instead of a hover button" },
 ];
 
 const MAX_TOKEN_OPTIONS = [512, 1024, 1500, 2048, 0] as const;
@@ -64,15 +80,10 @@ const LANGUAGES = [
 ];
 
 export function Options() {
-  const [settings, setSettings] = useState<AppSettings>({
-    apiKey: "",
-    defaultDepth: "undergrad",
-    theme: "dark",
-    onboardingCompleted: false,
-    model: "claude-sonnet-4-6",
-    maxTokens: 1500,
-    language: "English",
-  });
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
+  const [catalog, setCatalog] = useState<ModelCatalog | null>(null);
+  const [refreshingModels, setRefreshingModels] = useState(false);
+  const [newSite, setNewSite] = useState("");
   const [step, setStep] = useState(0);
   const [showKey, setShowKey] = useState(false);
   const [validating, setValidating] = useState(false);
@@ -88,7 +99,29 @@ export function Options() {
       }
       applyTheme(s?.theme ?? "dark");
     });
+    chrome.runtime.sendMessage({ type: "GET_MODELS" }, (c: ModelCatalog) => {
+      if (c?.models?.length) setCatalog(c);
+    });
   }, []);
+
+  const refreshModels = () => {
+    setRefreshingModels(true);
+    chrome.runtime.sendMessage({ type: "GET_MODELS", payload: { force: true } }, (c: ModelCatalog) => {
+      setRefreshingModels(false);
+      if (c?.models?.length) setCatalog(c);
+    });
+  };
+
+  const addSite = () => {
+    const host = normalizeHost(newSite);
+    if (!host || settings.siteAllowlist.includes(host)) { setNewSite(""); return; }
+    setSettings((s) => ({ ...s, siteAllowlist: [...s.siteAllowlist, host].sort() }));
+    setNewSite("");
+  };
+
+  const removeSite = (host: string) => {
+    setSettings((s) => ({ ...s, siteAllowlist: s.siteAllowlist.filter((h) => h !== host) }));
+  };
 
   const applyTheme = (t: string) => {
     const resolved = t === "system"
@@ -113,7 +146,11 @@ export function Options() {
       (res: { valid: boolean }) => {
         setValidating(false);
         setKeyValid(res?.valid ?? false);
-        if (res?.valid) saveAndUpdate({ apiKey: settings.apiKey });
+        if (res?.valid) {
+          saveAndUpdate({ apiKey: settings.apiKey });
+          // The catalog needs a key; the first fetch on install had none.
+          refreshModels();
+        }
       },
     );
   };
@@ -141,7 +178,7 @@ export function Options() {
           </div>
 
           <div className="flex items-center justify-center gap-2 mb-8">
-            {[0, 1, 2, 3].map((s) => (
+            {[0, 1, 2, 3, 4].map((s) => (
               <div key={s} className={`h-1.5 rounded-full transition-all ${s <= step ? "bg-eq-accent w-8" : "bg-eq-border w-4"}`} />
             ))}
           </div>
@@ -211,7 +248,28 @@ export function Options() {
 
             {step === 3 && (
               <div>
-                <h2 className="text-lg font-semibold text-eq-text-primary mb-2">Step 4: Try It Out</h2>
+                <h2 className="text-lg font-semibold text-eq-text-primary mb-2">Step 4: Where It Runs</h2>
+                <p className="text-sm text-eq-text-secondary mb-4">
+                  Equationeer stays out of the way by default: it only wakes up on PDFs. Widen it here or in Settings at any time.
+                </p>
+                <div className="space-y-2">
+                  {ACTIVATION_OPTIONS.map(({ value, label, desc }) => (
+                    <label key={value} className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${settings.siteActivation === value ? "border-eq-accent bg-eq-accent/5" : "border-eq-border hover:border-eq-accent/30"}`}>
+                      <input type="radio" name="onboarding-activation" value={value} checked={settings.siteActivation === value} onChange={() => saveAndUpdate({ siteActivation: value })} className="mt-0.5" />
+                      <div>
+                        <p className="text-sm font-medium text-eq-text-primary">{label}</p>
+                        <p className="text-xs text-eq-text-secondary">{desc}</p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+                <button onClick={() => setStep(4)} className="mt-4 w-full px-3 py-2 text-sm bg-eq-accent text-white rounded-lg hover:bg-eq-accent-hover transition-colors">Next</button>
+              </div>
+            )}
+
+            {step === 4 && (
+              <div>
+                <h2 className="text-lg font-semibold text-eq-text-primary mb-2">Step 5: Try It Out</h2>
                 <p className="text-sm text-eq-text-secondary mb-4">Here's what an explanation looks like:</p>
                 <div className="mb-4 p-3 rounded-lg bg-eq-bg-secondary border border-eq-border">
                   <p className="text-xs text-eq-text-secondary mb-1">Selected equation:</p>
@@ -241,6 +299,12 @@ export function Options() {
   }
 
   // Settings mode (post-onboarding)
+  const models = catalog?.models ?? BUNDLED_MODELS;
+  const modelStillAvailable = Boolean(findModel(models, settings.model));
+  const catalogNote = catalog?.source === "live"
+    ? `Updated ${new Date(catalog.fetchedAt).toLocaleDateString()}`
+    : "Built-in list. Add a valid API key to read the live one";
+
   return (
     <div className="min-h-screen bg-eq-bg-primary p-8">
       <div className="max-w-lg mx-auto">
@@ -268,14 +332,18 @@ export function Options() {
             <p className="mt-2 text-xs text-eq-text-secondary">Stored locally in Chrome. Never shared except with the Anthropic API.</p>
           </section>
 
-          {/* Model */}
+          {/* Where it runs */}
           <section className="bg-eq-bg-panel rounded-xl border border-eq-border p-5">
-            <h2 className="text-sm font-semibold text-eq-text-primary mb-1">Claude Model</h2>
-            <p className="text-xs text-eq-text-secondary mb-3">Affects explanation quality, speed, and API cost.</p>
+            <h2 className="text-sm font-semibold text-eq-text-primary mb-1">Where Equationeer Runs</h2>
+            <p className="text-xs text-eq-text-secondary mb-3">
+              By default Equationeer stays out of the way everywhere except PDFs.
+            </p>
+
+            <p className="text-xs font-medium text-eq-text-primary mb-2">Active on</p>
             <div className="space-y-2">
-              {MODELS.map(({ value, label, desc }) => (
-                <label key={value} className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${settings.model === value ? "border-eq-accent bg-eq-accent/5" : "border-eq-border hover:border-eq-accent/30"}`}>
-                  <input type="radio" name="model" value={value} checked={settings.model === value} onChange={() => setSettings((s) => ({ ...s, model: value }))} className="mt-0.5" />
+              {ACTIVATION_OPTIONS.map(({ value, label, desc }) => (
+                <label key={value} className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${settings.siteActivation === value ? "border-eq-accent bg-eq-accent/5" : "border-eq-border hover:border-eq-accent/30"}`}>
+                  <input type="radio" name="activation" value={value} checked={settings.siteActivation === value} onChange={() => setSettings((s) => ({ ...s, siteActivation: value }))} className="mt-0.5" />
                   <div>
                     <p className="text-sm font-medium text-eq-text-primary">{label}</p>
                     <p className="text-xs text-eq-text-secondary">{desc}</p>
@@ -283,12 +351,102 @@ export function Options() {
                 </label>
               ))}
             </div>
+
+            {settings.siteActivation === "allowlist" && (
+              <div className="mt-3 pt-3 border-t border-eq-border">
+                <p className="text-xs font-medium text-eq-text-primary mb-2">Allowed sites</p>
+                <div className="flex gap-2">
+                  <input
+                    value={newSite}
+                    onChange={(e) => setNewSite(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") addSite(); }}
+                    placeholder="arxiv.org"
+                    className="flex-1 px-3 py-2 text-sm bg-eq-bg-secondary border border-eq-border rounded-lg text-eq-text-primary placeholder:text-eq-text-secondary/40 focus:outline-none focus:border-eq-accent"
+                  />
+                  <button onClick={addSite} className="px-3 py-2 text-sm rounded-lg border border-eq-border text-eq-text-primary hover:border-eq-accent/40 transition-colors">
+                    Add
+                  </button>
+                </div>
+                {settings.siteAllowlist.length === 0 ? (
+                  <p className="mt-2 text-xs text-eq-text-secondary/60">No sites yet. Subdomains of an entry are included.</p>
+                ) : (
+                  <ul className="mt-2 space-y-1">
+                    {settings.siteAllowlist.map((host) => (
+                      <li key={host} className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-md bg-eq-bg-secondary border border-eq-border">
+                        <span className="text-xs text-eq-text-primary truncate">{host}</span>
+                        <button onClick={() => removeSite(host)} aria-label={`Remove ${host}`} className="text-xs text-eq-text-secondary hover:text-eq-error transition-colors">
+                          Remove
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+
+            <div className="mt-4 pt-3 border-t border-eq-border">
+              <p className="text-xs font-medium text-eq-text-primary mb-2">Hover &ldquo;&Sigma; Explain&rdquo; button</p>
+              <div className="space-y-2">
+                {TOOLTIP_OPTIONS.map(({ value, label, desc }) => (
+                  <label key={value} className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${settings.tooltipScope === value ? "border-eq-accent bg-eq-accent/5" : "border-eq-border hover:border-eq-accent/30"}`}>
+                    <input type="radio" name="tooltip" value={value} checked={settings.tooltipScope === value} onChange={() => setSettings((s) => ({ ...s, tooltipScope: value }))} className="mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-eq-text-primary">{label}</p>
+                      <p className="text-xs text-eq-text-secondary">{desc}</p>
+                    </div>
+                  </label>
+                ))}
+              </div>
+              <p className="mt-2 text-xs text-eq-text-secondary/60">
+                The pill never appears on a page Equationeer is not active on.
+              </p>
+            </div>
+          </section>
+
+          {/* Model */}
+          <section className="bg-eq-bg-panel rounded-xl border border-eq-border p-5">
+            <div className="flex items-start justify-between gap-3 mb-1">
+              <h2 className="text-sm font-semibold text-eq-text-primary">Claude Model</h2>
+              <button
+                onClick={refreshModels}
+                disabled={refreshingModels}
+                className="px-2 py-1 text-xs rounded-md border border-eq-border text-eq-text-secondary hover:text-eq-text-primary hover:border-eq-accent/40 disabled:opacity-40 transition-colors"
+              >
+                {refreshingModels ? "Refreshing…" : "Refresh list"}
+              </button>
+            </div>
+            <p className="text-xs text-eq-text-secondary mb-3">
+              Read live from the Anthropic Models API with your key, newest first, so new models appear here without updating the extension.
+            </p>
+            <div className="space-y-2">
+              {models.map((m) => (
+                <label key={m.id} className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${settings.model === m.id ? "border-eq-accent bg-eq-accent/5" : "border-eq-border hover:border-eq-accent/30"}`}>
+                  <input type="radio" name="model" value={m.id} checked={settings.model === m.id} onChange={() => setSettings((s) => ({ ...s, model: m.id }))} className="mt-0.5" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-eq-text-primary">{m.displayName}</p>
+                    <p className="text-xs text-eq-text-secondary">{describeModel(m)}</p>
+                    <p className="text-xs text-eq-text-secondary/50 mt-0.5 truncate">
+                      {m.id}
+                      {m.supportsImages ? "" : " · no image input, Screenshot Mode unavailable"}
+                    </p>
+                  </div>
+                </label>
+              ))}
+            </div>
+            {!modelStillAvailable && (
+              <p className="mt-2 text-xs text-eq-error">
+                The selected model ({settings.model}) is not in the current list. Pick another, or Equationeer falls back to {DEFAULT_MODEL}.
+              </p>
+            )}
+            <p className="mt-2 text-xs text-eq-text-secondary/60">
+              {catalogNote} · Pricing at console.anthropic.com
+            </p>
           </section>
 
           {/* Max Tokens */}
           <section className="bg-eq-bg-panel rounded-xl border border-eq-border p-5">
             <h2 className="text-sm font-semibold text-eq-text-primary mb-1">Response Length</h2>
-            <p className="text-xs text-eq-text-secondary mb-3">Maximum tokens per explanation. Lower = cheaper &amp; faster; "Max" uses the model's limit.</p>
+            <p className="text-xs text-eq-text-secondary mb-3">Maximum tokens per explanation. Lower = cheaper &amp; faster; &ldquo;Max&rdquo; uses the model&rsquo;s limit, capped at {MAX_OUTPUT_CEILING.toLocaleString()}.</p>
             <div className="flex gap-2">
               {MAX_TOKEN_OPTIONS.map((n) => (
                 <button
@@ -301,7 +459,7 @@ export function Options() {
               ))}
             </div>
             <p className="mt-2 text-xs text-eq-text-secondary/60">
-              Selected: {settings.maxTokens === 0 ? "Max (model limit)" : `${settings.maxTokens} tokens`}
+              Selected: {settings.maxTokens === 0 ? `Max (${MAX_OUTPUT_CEILING.toLocaleString()} tokens)` : `${settings.maxTokens} tokens`}
             </p>
           </section>
 

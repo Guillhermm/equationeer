@@ -1,3 +1,5 @@
+import type { ActivationScope, TooltipScope } from "../utils/siteScope";
+
 export type ExplanationDepth = "grad" | "undergrad" | "curious";
 
 export interface ExplainMathRequest {
@@ -45,6 +47,17 @@ export interface GetSettingsRequest {
   type: "GET_SETTINGS";
 }
 
+export interface GetModelsRequest {
+  type: "GET_MODELS";
+  payload?: { force?: boolean };
+}
+
+/** Content script reporting whether it activated, so the context menu can follow. */
+export interface ScopeStatusRequest {
+  type: "SCOPE_STATUS";
+  payload: { active: boolean };
+}
+
 export interface SaveSettingsRequest {
   type: "SAVE_SETTINGS";
   payload: Partial<AppSettings>;
@@ -74,6 +87,8 @@ export type ExtensionMessage =
   | OpenSidePanelRequest
   | GetSettingsRequest
   | SaveSettingsRequest
+  | GetModelsRequest
+  | ScopeStatusRequest
   | QueuePendingRequest;
 
 export interface StreamChunk {
@@ -98,19 +113,21 @@ export interface ConversationMessage {
   content: string;
 }
 
-export type ClaudeModel =
-  | "claude-haiku-4-5-20251001"
-  | "claude-sonnet-4-6"
-  | "claude-opus-4-7";
-
 export interface AppSettings {
   apiKey: string;
   defaultDepth: ExplanationDepth;
   theme: "dark" | "light" | "system";
   onboardingCompleted: boolean;
-  model: ClaudeModel;
+  /** A model ID from the live catalog, not a fixed union, so new models work without a rebuild. */
+  model: string;
   maxTokens: number;
   language: string;
+  /** Where the extension attaches at all. See utils/siteScope.ts. */
+  siteActivation: ActivationScope;
+  /** Where the floating Explain pill appears. Bounded by siteActivation. */
+  tooltipScope: TooltipScope;
+  /** Hostnames the user has opted in, used when siteActivation is "allowlist". */
+  siteAllowlist: string[];
 }
 
 export interface HistoryEntry {

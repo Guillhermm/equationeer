@@ -1,37 +1,55 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+import type { AppSettings } from "../types/messages";
+
+/** Only what the popup needs: whether Screenshot Mode can run on this tab. */
+interface PageScope {
+  active: boolean;
+}
 
 export function Popup() {
-  const [hasApiKey, setHasApiKey] = useState(false);
+  const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [scope, setScope] = useState<PageScope | null>(null);
+  const [tabId, setTabId] = useState<number | null>(null);
 
-  useEffect(() => {
-    chrome.runtime.sendMessage({ type: "GET_SETTINGS" }, (settings) => {
-      if (settings?.apiKey) setHasApiKey(true);
-      if (settings?.theme) {
-        const t = settings.theme === "system"
-          ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
-          : settings.theme;
-        document.documentElement.classList.toggle("dark", t === "dark");
-        document.documentElement.classList.toggle("light", t === "light");
-      }
+  const loadScope = useCallback((id: number) => {
+    chrome.tabs.sendMessage(id, { type: "GET_SCOPE" }, (response?: PageScope) => {
+      // No content script on this page (chrome:// pages, the Web Store, …).
+      if (chrome.runtime.lastError || !response) setScope(null);
+      else setScope(response);
     });
   }, []);
 
-  const openSidePanel = () => {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs[0]?.id) {
-        chrome.sidePanel.open({ tabId: tabs[0].id });
-      }
+  useEffect(() => {
+    chrome.runtime.sendMessage({ type: "GET_SETTINGS" }, (s: AppSettings) => {
+      if (!s) return;
+      setSettings(s);
+      const t = s.theme === "system"
+        ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+        : s.theme;
+      document.documentElement.classList.toggle("dark", t === "dark");
+      document.documentElement.classList.toggle("light", t === "light");
     });
+
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      const id = tabs[0]?.id;
+      if (id === undefined) return;
+      setTabId(id);
+      loadScope(id);
+    });
+  }, [loadScope]);
+
+  const openSidePanel = () => {
+    if (tabId !== null) chrome.sidePanel.open({ tabId });
   };
 
   const activateScreenshot = () => {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs[0]?.id) {
-        chrome.tabs.sendMessage(tabs[0].id, { type: "ACTIVATE_SCREENSHOT" });
-        window.close();
-      }
-    });
+    if (tabId === null) return;
+    chrome.tabs.sendMessage(tabId, { type: "ACTIVATE_SCREENSHOT" });
+    window.close();
   };
+
+  const hasApiKey = Boolean(settings?.apiKey);
+  const active = scope?.active ?? false;
 
   return (
     <div className="w-72 p-4 bg-eq-bg-primary">
@@ -60,24 +78,28 @@ export function Popup() {
         <div>
           <button
             onClick={openSidePanel}
-            className="w-full px-3 py-2.5 text-sm font-medium bg-eq-accent text-white rounded-lg hover:bg-eq-accent-hover transition-colors"
+            disabled={tabId === null}
+            className="w-full px-3 py-2.5 text-sm font-medium bg-eq-accent text-white rounded-lg hover:bg-eq-accent-hover disabled:opacity-40 transition-colors"
           >
             Open Explanation Panel
           </button>
           <p className="text-xs text-eq-text-secondary/60 mt-1.5 px-1">
-            Highlight any math on a webpage or text-based PDF, then click the &ldquo;&Sigma;&thinsp;Explain&rdquo; button that appears.
+            On a web page, highlight math and click the &ldquo;&Sigma;&thinsp;Explain&rdquo; pill. In Chrome&rsquo;s PDF viewer, use the &Sigma; button in the corner, or right-click a selection.
           </p>
         </div>
 
         <div>
           <button
             onClick={activateScreenshot}
-            className="w-full px-3 py-2.5 text-sm font-medium bg-eq-bg-secondary text-eq-text-primary border border-eq-border rounded-lg hover:border-eq-accent/30 transition-colors"
+            disabled={!active}
+            className="w-full px-3 py-2.5 text-sm font-medium bg-eq-bg-secondary text-eq-text-primary border border-eq-border rounded-lg hover:border-eq-accent/30 disabled:opacity-40 transition-colors"
           >
             Screenshot Mode
           </button>
           <p className="text-xs text-eq-text-secondary/60 mt-1.5 px-1">
-            For image-based equations. Open the PDF in Chrome first, then draw a rectangle over the equation.
+            {active
+              ? "Draw a rectangle over any equation, including anything rendered as an image."
+              : "Available once Equationeer is turned on for this page."}
           </p>
         </div>
 

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Equationeer",
   "description": "Highlight any mathematical equation and get a deep, intuitive explanation powered by Claude AI.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "icons": {
     "16": "src/assets/icons/icon16.png",
     "48": "src/assets/icons/icon48.png",
@@ -21,9 +21,15 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["src/content/content.tsx"],
-      "css": ["src/content/content.css"]
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "src/content/content.tsx"
+      ],
+      "css": [
+        "src/content/content.css"
+      ]
     }
   ],
   "side_panel": {

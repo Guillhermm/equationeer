@@ -1,23 +1,79 @@
-import { streamExplanation, streamImageExplanation, validateApiKey } from "../utils/api";
-import { getSettings, saveSettings } from "../utils/storage";
+import { fetchModels, streamExplanation, streamImageExplanation, validateApiKey } from "../utils/api";
+import {
+  getCachedModelCatalog,
+  getSettings,
+  saveSettings,
+  setCachedModelCatalog,
+} from "../utils/settings";
+import {
+  BUNDLED_MODELS,
+  EXPLANATION_EFFORT,
+  findModel,
+  isCatalogStale,
+  resolveMaxTokens,
+  resolveModelId,
+  wordBudget,
+  type ModelCatalog,
+  type ModelInfo,
+} from "../utils/models";
 import {
   buildExplanationPrompt,
   buildFollowUpPrompt,
   buildImageExplanationPrompt,
 } from "../utils/promptBuilder";
-import type { StreamMessage } from "../types/messages";
+import type { AppSettings, StreamMessage } from "../types/messages";
 
 const log = (...a: unknown[]) => console.log("[EQ:SW]", ...a);
 const err = (...a: unknown[]) => console.error("[EQ:SW]", ...a);
 
-const MODEL_MAX_TOKENS: Record<string, number> = {
-  "claude-haiku-4-5-20251001": 8096,
-  "claude-sonnet-4-6": 8096,
-  "claude-opus-4-7": 16000,
-};
+// ── Model catalog ────────────────────────────────────────────────────────────
 
-function resolveMaxTokens(model: string, maxTokens: number): number {
-  return maxTokens === 0 ? (MODEL_MAX_TOKENS[model] ?? 8096) : maxTokens;
+/**
+ * The catalog is fetched from the Models API with the user's key and cached for
+ * a day, so a model released after this build appears in Settings on its own.
+ * The bundled list is only the cold-start fallback.
+ */
+async function getModelCatalog(force = false): Promise<ModelCatalog> {
+  const cached = await getCachedModelCatalog();
+  if (!force && !isCatalogStale(cached)) return cached as ModelCatalog;
+
+  const { apiKey } = await getSettings();
+  if (apiKey) {
+    try {
+      const models = await fetchModels(apiKey);
+      const fresh: ModelCatalog = { models, fetchedAt: Date.now(), source: "live" };
+      await setCachedModelCatalog(fresh);
+      log("Model catalog refreshed:", models.length, "models");
+      return fresh;
+    } catch (e) {
+      err("Model catalog refresh failed, using cache:", e);
+    }
+  }
+  return cached ?? { models: BUNDLED_MODELS, fetchedAt: 0, source: "bundled" };
+}
+
+interface SelectedModel {
+  id: string;
+  info?: ModelInfo;
+  maxTokens: number;
+  /** Undefined for models that reject the parameter outright. */
+  effort?: string;
+}
+
+/** Resolve the configured model against the catalog, falling back if it was retired. */
+async function selectModel(settings: AppSettings): Promise<SelectedModel> {
+  const catalog = await getModelCatalog();
+  const id = resolveModelId(catalog.models, settings.model);
+  if (id !== settings.model) {
+    log("Configured model", settings.model, "is unavailable, falling back to", id);
+  }
+  const info = findModel(catalog.models, id);
+  return {
+    id,
+    info,
+    maxTokens: resolveMaxTokens(settings.maxTokens, info),
+    effort: info?.supportsEffort ? EXPLANATION_EFFORT : undefined,
+  };
 }
 
 // ── Rate limiting ────────────────────────────────────────────────────────────
@@ -51,14 +107,54 @@ function broadcastError(message: string): void {
 
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => {});
 
+const MENU_ID = "equationeer-explain";
+
 chrome.runtime.onInstalled.addListener((details) => {
   log("Installed:", details.reason);
   chrome.contextMenus.create(
-    { id: "equationeer-explain", title: "Explain with Equationeer", contexts: ["selection"] },
+    // Visible unless a content script reports the page is out of scope.
+    { id: MENU_ID, title: "Explain with Equationeer", contexts: ["selection"], visible: true },
     () => { if (chrome.runtime.lastError) err("Context menu:", chrome.runtime.lastError.message); },
   );
   if (details.reason === "install") chrome.runtime.openOptionsPage();
+  void getModelCatalog(true);
 });
+
+chrome.runtime.onStartup.addListener(() => { void getModelCatalog(); });
+
+// ── Per-tab activation, mirrored onto the context menu ───────────────────────
+
+/**
+ * The content script is the only place that can tell whether a page is a PDF,
+ * so it reports its scope decision here. The context menu is global, so it is
+ * updated whenever the active tab changes.
+ *
+ * Fails open: a tab we have heard nothing from keeps the menu. After an
+ * extension update every already-open tab holds an orphaned content script that
+ * can no longer message us, and failing closed would silently remove the
+ * right-click entry from all of them until each was reloaded.
+ */
+const activeTabs = new Map<number, boolean>();
+
+function syncContextMenu(tabId: number | undefined): void {
+  const visible = tabId === undefined || activeTabs.get(tabId) !== false;
+  chrome.contextMenus.update(MENU_ID, { visible }, () => {
+    // The menu does not exist until onInstalled has run; ignore that case.
+    void chrome.runtime.lastError;
+  });
+}
+
+chrome.tabs.onActivated.addListener(({ tabId }) => syncContextMenu(tabId));
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  // A navigation invalidates the previous decision until the new page reports.
+  if (changeInfo.status === "loading") {
+    activeTabs.delete(tabId);
+    syncContextMenu(tabId);
+  }
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => activeTabs.delete(tabId));
 
 // ── Context menu ─────────────────────────────────────────────────────────────
 
@@ -153,6 +249,18 @@ async function handleMessage(
     case "GET_SETTINGS":
       return await getSettings();
 
+    case "GET_MODELS":
+      return await getModelCatalog((message.payload as { force?: boolean })?.force ?? false);
+
+    case "SCOPE_STATUS": {
+      const tabId = sender.tab?.id;
+      if (tabId === undefined) return { error: "No tabId" };
+      const active = (message.payload as { active: boolean }).active;
+      activeTabs.set(tabId, active);
+      if (sender.tab?.active) syncContextMenu(tabId);
+      return { success: true };
+    }
+
     case "SAVE_SETTINGS":
       return await saveSettings(message.payload as Partial<Record<string, unknown>>);
 
@@ -206,16 +314,18 @@ async function handleExplainMath(payload: {
     pageUrl: payload.pageUrl,
     depth: payload.depth as "grad" | "undergrad" | "curious",
     language: settings.language,
+    // max_tokens is a ceiling the model cannot see; this is what makes it fit.
+    wordBudget: wordBudget(settings.maxTokens),
   });
 
-  const maxTokens = resolveMaxTokens(settings.model, settings.maxTokens);
-  log("Starting Claude stream for math, model:", settings.model, "maxTokens:", maxTokens);
+  const { id, maxTokens, effort } = await selectModel(settings);
+  log("Starting Claude stream for math, model:", id, "maxTokens:", maxTokens, "effort:", effort);
   streamExplanation(
     settings.apiKey,
     systemPrompt,
     [{ role: "user", content: payload.math }],
     broadcast,
-    { model: settings.model, maxTokens },
+    { model: id, maxTokens, effort },
   ).catch((e) => { err(e); broadcastError(String(e)); });
 
   return { streaming: true };
@@ -239,16 +349,24 @@ async function handleExplainImage(payload: {
     pageUrl: payload.pageUrl,
     depth: payload.depth as "grad" | "undergrad" | "curious",
     language: settings.language,
+    // max_tokens is a ceiling the model cannot see; this is what makes it fit.
+    wordBudget: wordBudget(settings.maxTokens),
   });
 
-  const maxTokensImg = resolveMaxTokens(settings.model, settings.maxTokens);
-  log("Starting Claude stream for image, model:", settings.model, "maxTokens:", maxTokensImg);
+  const selected = await selectModel(settings);
+  if (selected.info && !selected.info.supportsImages) {
+    const msg = `${selected.info.displayName} cannot read images. Pick a vision-capable model in Settings to use Screenshot Mode.`;
+    broadcastError(msg);
+    return { error: msg };
+  }
+
+  log("Starting Claude stream for image, model:", selected.id, "maxTokens:", selected.maxTokens);
   streamImageExplanation(
     settings.apiKey,
     systemPrompt,
     payload.imageDataUrl,
     broadcast,
-    { model: settings.model, maxTokens: maxTokensImg },
+    { model: selected.id, maxTokens: selected.maxTokens, effort: selected.effort },
   ).catch((e) => { err(e); broadcastError(String(e)); });
 
   return { streaming: true };
@@ -272,6 +390,8 @@ async function handleFollowUp(payload: {
     originalMath: payload.originalMath,
     depth: payload.depth as "grad" | "undergrad" | "curious",
     language: settings.language,
+    // max_tokens is a ceiling the model cannot see; this is what makes it fit.
+    wordBudget: wordBudget(settings.maxTokens),
   });
 
   const messages = [
@@ -279,14 +399,14 @@ async function handleFollowUp(payload: {
     { role: "user" as const, content: payload.question },
   ];
 
-  const maxTokensFu = resolveMaxTokens(settings.model, settings.maxTokens);
-  log("Starting Claude stream for follow-up, model:", settings.model, "maxTokens:", maxTokensFu);
+  const { id, maxTokens, effort } = await selectModel(settings);
+  log("Starting Claude stream for follow-up, model:", id, "maxTokens:", maxTokens, "effort:", effort);
   streamExplanation(
     settings.apiKey,
     systemPrompt,
     messages,
     broadcast,
-    { model: settings.model, maxTokens: maxTokensFu },
+    { model: id, maxTokens, effort },
   ).catch((e) => { err(e); broadcastError(String(e)); });
 
   return { streaming: true };
